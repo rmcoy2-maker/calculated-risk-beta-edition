@@ -15,7 +15,7 @@ st.set_page_config(page_title="96 Compare Models", page_icon="📈", layout="wid
 # Login guard
 # -----------------------------
 if not st.session_state.get("authenticated", False):
-    st.switch_page("Home.py")
+    st.switch_page("00_Home.py")
     st.stop()
 
 st.sidebar.success(f"Logged in as {st.session_state.get('user', '')}")
