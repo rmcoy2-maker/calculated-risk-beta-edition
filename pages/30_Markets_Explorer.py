@@ -1,26 +1,45 @@
 # serving_ui/app/pages/30_Markets_Explorer.py
 
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
-# -------------------------------------------------
-# Ensure project root is on path
-# -------------------------------------------------
-CURRENT = Path(__file__).resolve()
-ROOT = CURRENT.parents[3]
+HERE = Path(__file__).resolve()
 
+def find_repo_root() -> Path:
+    for p in [HERE.parent] + list(HERE.parents):
+        if (p / "streamlit_app.py").exists():
+            return p
+    return Path.cwd()
+
+ROOT = find_repo_root()
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core_engine.tools.market_grouping import prepare_markets_for_app
+try:
+    from core_engine.tools.market_grouping import prepare_markets_for_app
+except Exception:
+    def prepare_markets_for_app(df: pd.DataFrame) -> pd.DataFrame:
+        out = df.copy()
 
-# -------------------------------------------------
-# Data paths
-# -------------------------------------------------
+        if "event_id" not in out.columns:
+            if {"home_team", "away_team"}.issubset(out.columns):
+                out["event_id"] = (
+                    out["home_team"].astype(str) + " vs " + out["away_team"].astype(str)
+                )
+            else:
+                out["event_id"] = out.index.astype(str)
+
+        sort_cols = [c for c in ["event_id", "market", "selection", "book", "price"] if c in out.columns]
+        if sort_cols:
+            out = out.sort_values(sort_cols, na_position="last")
+
+        return out
+
 DATA_DIR = ROOT / "exports" / "markets"
 
 @st.cache_data(show_spinner=False)
