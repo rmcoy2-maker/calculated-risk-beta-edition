@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import streamlit as st
-
 
 st.set_page_config(page_title="96 Compare Models", page_icon="📈", layout="wide")
 
@@ -15,7 +14,7 @@ st.set_page_config(page_title="96 Compare Models", page_icon="📈", layout="wid
 # Login guard
 # -----------------------------
 if not st.session_state.get("authenticated", False):
-    st.switch_page("00_Home.py")
+    st.switch_page("streamlit_app.py")
     st.stop()
 
 st.sidebar.success(f"Logged in as {st.session_state.get('user', '')}")
@@ -29,8 +28,7 @@ def project_root() -> Path:
 
 
 def exports_dir() -> Path:
-    exp = project_root() / "exports"
-    return exp
+    return project_root() / "exports"
 
 
 def to_series(x) -> pd.Series:

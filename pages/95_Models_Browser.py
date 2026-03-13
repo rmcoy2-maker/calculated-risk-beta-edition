@@ -7,14 +7,13 @@ import tempfile
 import pandas as pd
 import streamlit as st
 
-
 st.set_page_config(page_title="95 Models Browser", page_icon="📈", layout="wide")
 
 # -----------------------------
 # Login guard
 # -----------------------------
 if not st.session_state.get("authenticated", False):
-    st.switch_page("00_Home.py")
+    st.switch_page("streamlit_app.py")
     st.stop()
 
 st.sidebar.success(f"Logged in as {st.session_state.get('user', '')}")
@@ -29,7 +28,6 @@ MODELS_DIRS = [
     REPO / "artifacts" / "models",
 ]
 
-# writable temp area for cloud
 TMP_DIR = Path(tempfile.gettempdir()) / "calculated_risk"
 TMP_DIR.mkdir(parents=True, exist_ok=True)
 ACTIVE_MARKER = TMP_DIR / "ACTIVE_MODEL.txt"
@@ -58,7 +56,7 @@ def discover_models() -> list[dict]:
         if not base.exists():
             continue
 
-        # Case 1: model folders
+        # Model folders
         for p in base.iterdir():
             if not p.is_dir():
                 continue
@@ -85,7 +83,7 @@ def discover_models() -> list[dict]:
                 }
             )
 
-        # Case 2: flat model files directly under models/
+        # Flat model files directly under base
         flat_models = list(base.glob("*.joblib")) + list(base.glob("*.pkl"))
         if flat_models:
             meta_candidates = {}
@@ -107,7 +105,6 @@ def discover_models() -> list[dict]:
                     }
                 )
 
-    # dedupe on path
     seen = set()
     out = []
     for r in rows:
