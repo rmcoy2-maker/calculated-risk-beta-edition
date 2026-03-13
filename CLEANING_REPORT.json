@@ -1,0 +1,203 @@
+{
+  "00_Line_Shop.py": {
+    "status": "salvaged",
+    "start": 2930,
+    "end": 11418,
+    "length": 8483,
+    "score": 80
+  },
+  "00_Login.py": {
+    "status": "fallback_original",
+    "note": "No parsable cleaned slice found; original copied as fallback."
+  },
+  "01_Shortcuts.py": {
+    "status": "salvaged",
+    "start": 4370,
+    "end": 11078,
+    "length": 6697,
+    "score": 80
+  },
+  "02_User_manual.py": {
+    "status": "salvaged",
+    "start": 1002,
+    "end": 14976,
+    "length": 13974,
+    "score": 80
+  },
+  "03_Backtest (16).py": {
+    "status": "salvaged",
+    "start": 1710,
+    "end": 41935,
+    "length": 40220,
+    "score": 80
+  },
+  "03_Backtest.py": {
+    "status": "salvaged",
+    "start": 2946,
+    "end": 43657,
+    "length": 40706,
+    "score": 80
+  },
+  "04_Bankroll_Tracker.py": {
+    "status": "salvaged",
+    "start": 92,
+    "end": 8712,
+    "length": 8621,
+    "score": 82
+  },
+  "05_Parlay_Builder.py": {
+    "status": "salvaged",
+    "start": 9281,
+    "end": 23101,
+    "length": 13815,
+    "score": 82
+  },
+  "06_Ghost_Parlay_Calc.py": {
+    "status": "salvaged",
+    "start": 5536,
+    "end": 17189,
+    "length": 11642,
+    "score": 82
+  },
+  "07_Parlay_Scored_Explorer.py": {
+    "status": "salvaged",
+    "start": 9196,
+    "end": 14346,
+    "length": 5145,
+    "score": 82
+  },
+  "08_Settle_Parlay.py": {
+    "status": "salvaged",
+    "start": 5536,
+    "end": 19590,
+    "length": 14043,
+    "score": 80
+  },
+  "09_All_Picks_Explorer.py": {
+    "status": "salvaged",
+    "start": 7276,
+    "end": 16364,
+    "length": 9082,
+    "score": 82
+  },
+  "09_Analytics_Hub.py": {
+    "status": "salvaged",
+    "start": 2953,
+    "end": 19100,
+    "length": 16143,
+    "score": 80
+  },
+  "09_Lines_Explorer.py": {
+    "status": "salvaged",
+    "start": 8183,
+    "end": 21646,
+    "length": 13452,
+    "score": 82
+  },
+  "10_Edge_Scanner.py": {
+    "status": "salvaged",
+    "start": 111,
+    "end": 6925,
+    "length": 6815,
+    "score": 82
+  },
+  "11_Hedge_Finder.py": {
+    "status": "salvaged",
+    "start": 9196,
+    "end": 15292,
+    "length": 6091,
+    "score": 82
+  },
+  "12_Micro_Calculations.py": {
+    "status": "salvaged",
+    "start": 5536,
+    "end": 13614,
+    "length": 8066,
+    "score": 82
+  },
+  "13_Your_Log.py": {
+    "status": "salvaged",
+    "start": 4513,
+    "end": 11445,
+    "length": 6921,
+    "score": 80
+  },
+  "14_Your_History.py": {
+    "status": "fallback_original",
+    "note": "No parsable cleaned slice found; original copied as fallback."
+  },
+  "20_Settled.py": {
+    "status": "salvaged",
+    "start": 4513,
+    "end": 16733,
+    "length": 12210,
+    "score": 82
+  },
+  "23_Doc_Odds_Live_Board.py": {
+    "status": "salvaged",
+    "start": 111,
+    "end": 8330,
+    "length": 8220,
+    "score": 82
+  },
+  "93_Analytics.py": {
+    "status": "salvaged",
+    "start": 3916,
+    "end": 27273,
+    "length": 23354,
+    "score": 70
+  },
+  "94_Legal_Terms_Privacy.py": {
+    "status": "salvaged",
+    "start": 4930,
+    "end": 18522,
+    "length": 13590,
+    "score": 80
+  },
+  "95_Models_Browser.py": {
+    "status": "salvaged",
+    "start": 5536,
+    "end": 12927,
+    "length": 7380,
+    "score": 80
+  },
+  "96_Compare_Models.py": {
+    "status": "salvaged",
+    "start": 5393,
+    "end": 17653,
+    "length": 12248,
+    "score": 80
+  },
+  "96_Data_Diagnostics.py": {
+    "status": "salvaged",
+    "start": 2593,
+    "end": 6211,
+    "length": 3608,
+    "score": 80
+  },
+  "97_Settle_Diagnostics.py": {
+    "status": "salvaged",
+    "start": 4513,
+    "end": 15749,
+    "length": 11226,
+    "score": 80
+  },
+  "98_Diagnostics.py": {
+    "status": "salvaged",
+    "start": 4513,
+    "end": 10089,
+    "length": 5566,
+    "score": 80
+  },
+  "99_Error_Dashboard.py": {
+    "status": "salvaged",
+    "start": 2824,
+    "end": 9093,
+    "length": 6264,
+    "score": 80
+  },
+  "__init__.py": {
+    "status": "fallback_original",
+    "note": "No parsable cleaned slice found; original copied as fallback."
+  }
+}
