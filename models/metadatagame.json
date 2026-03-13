@@ -1,0 +1,16 @@
+{
+  "rows": 5741,
+  "cols": [
+    "game_id",
+    "season",
+    "week",
+    "home_team",
+    "away_team",
+    "game_date",
+    "ml_home",
+    "ml_away",
+    "spread_close",
+    "total_close"
+  ],
+  "note": "stub trainer \u2014 replace with real model training"
+}

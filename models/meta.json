@@ -1,0 +1,23 @@
+{
+  "rows": 3086,
+  "win_rate": 0.49773169151004537,
+  "auc_train": 1.0,
+  "auc_valid": 0.6584673640678794,
+  "chosen_C": 2,
+  "num_cols": [
+    "odds",
+    "line",
+    "p_win",
+    "dec_comb",
+    "legs",
+    "parlay_stake",
+    "stake",
+    "edge"
+  ],
+  "cat_cols": [
+    "market",
+    "ref",
+    "sport",
+    "league"
+  ]
+}

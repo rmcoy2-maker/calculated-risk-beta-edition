@@ -1,0 +1,12 @@
+{
+  "records": 4,
+  "hitrate_rows": 4,
+  "line_bias_rows": 3,
+  "required_cols_present": [
+    "line",
+    "market",
+    "season",
+    "selection"
+  ],
+  "win_filled_rate": 1.0
+}

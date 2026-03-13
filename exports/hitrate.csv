@@ -1,0 +1,5 @@
+market,selection,line_bin,n,wins,hit_rate
+pass_yds,over,250.0–255.0,1,1.0,1.0
+pass_yds,under,250.0–255.0,1,1.0,1.0
+rec_yds,under,70.0–75.0,1,1.0,1.0
+rush_yds,over,65.0–70.0,1,1.0,1.0
