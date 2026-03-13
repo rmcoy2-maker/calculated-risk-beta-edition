@@ -224,7 +224,51 @@ except Exception:
             return pd.read_csv(path, low_memory=False, encoding="utf-8-sig")
         except Exception:
             return pd.DataFrame()
-from lib.join_scores import attach_scores
+try:
+    from lib.join_scores import attach_scores
+except Exception:
+    def attach_scores(edges: pd.DataFrame, scores: pd.DataFrame) -> pd.DataFrame:
+        if edges is None or edges.empty:
+            return pd.DataFrame() if edges is None else edges
+        if scores is None or scores.empty:
+            return edges.copy()
+
+        out = edges.copy()
+        sc = scores.copy()
+
+        # Standardize likely join keys
+        for df in (out, sc):
+            if "game_id" in df.columns:
+                df["game_id"] = df["game_id"].astype("string").str.strip()
+            if "home" in df.columns:
+                df["home"] = df["home"].astype("string").str.strip()
+            if "away" in df.columns:
+                df["away"] = df["away"].astype("string").str.strip()
+            if "date" in df.columns:
+                df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+
+        # Preferred join: game_id
+        if "game_id" in out.columns and "game_id" in sc.columns:
+            merged = out.merge(
+                sc,
+                on="game_id",
+                how="left",
+                suffixes=("", "_score"),
+            )
+            return merged
+
+        # Fallback join: home + away + date
+        join_cols = ["home", "away", "date"]
+        if all(c in out.columns for c in join_cols) and all(c in sc.columns for c in join_cols):
+            merged = out.merge(
+                sc,
+                on=join_cols,
+                how="left",
+                suffixes=("", "_score"),
+            )
+            return merged
+
+        return out
 try:
     from app.utils.diagnostics import mount_in_sidebar
 except ModuleNotFoundError:
