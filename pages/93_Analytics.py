@@ -52,19 +52,6 @@ except Exception:
 
 import importlib.util
 
-from pathlib import Path
-import importlib.util
-
-def _find_repo_root(start: Path) -> Path:
-    for p in [start] + list(start.parents):
-        if (p / "streamlit_app.py").exists():
-            return p
-    return start.parent
-
-from pathlib import Path
-import importlib.util
-import pandas as pd
-
 def _find_repo_root(start: Path) -> Path:
     for p in [start] + list(start.parents):
         if (p / "streamlit_app.py").exists():
@@ -124,6 +111,9 @@ def _fallback_apply_clv_columns(df: pd.DataFrame) -> pd.DataFrame:
         if "beat_closing" not in out.columns or out["beat_closing"].isna().all():
             out["beat_closing"] = out.apply(beat_closing_bool, axis=1)
 
+    if "clv" not in out.columns:
+        out["clv"] = np.nan
+
     return out
 
 def _load_clv_helper():
@@ -140,22 +130,22 @@ def _load_clv_helper():
     for clv_path in candidates:
         if clv_path.exists():
             spec = importlib.util.spec_from_file_location("clv_helper", clv_path)
-            mod = importlib.util.module_from_spec(spec)
-            assert spec and spec.loader
-            spec.loader.exec_module(mod)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
 
-            apply_clv_columns = getattr(mod, "apply_clv_columns", None)
-            american_to_decimal = getattr(mod, "american_to_decimal", None)
+                apply_clv_columns = getattr(mod, "apply_clv_columns", None)
+                american_to_decimal = getattr(mod, "american_to_decimal", None)
 
-            if apply_clv_columns and american_to_decimal:
-                return apply_clv_columns, american_to_decimal
+                if callable(apply_clv_columns) and callable(american_to_decimal):
+                    return apply_clv_columns, american_to_decimal
 
-    # Cloud-safe fallback: do not crash if helper file is missing
     return _fallback_apply_clv_columns, _fallback_american_to_decimal
-    )
-
 
 apply_clv_columns, american_to_decimal = _load_clv_helper()
+
+
+apply_clv_columns = lambda df: df
 
 st.set_page_config(page_title="93 • Analytics", page_icon="📊", layout="wide")
 require_eligibility(min_age=18, restricted_states={"WA", "ID", "NV"})
