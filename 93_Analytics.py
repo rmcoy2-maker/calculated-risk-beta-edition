@@ -2,87 +2,83 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib.util
 from pathlib import Path
-from typing import Iterable
-
 import numpy as np
 import pandas as pd
-import streamlit as st
 
 HERE = Path(__file__).resolve()
-for base in [HERE.parent, *HERE.parents]:
-    serving = base / "serving_ui"
-    if serving.exists() and str(serving) not in sys.path:
-        sys.path.insert(0, str(serving))
-    if (base / "app").exists() and str(base) not in sys.path:
-        sys.path.insert(0, str(base))
 
-try:
-    from app.lib.compliance_gate import require_eligibility
-except Exception:
-    def require_eligibility(*args, **kwargs):
-        return True
+def _find_repo_root(start: Path) -> Path:
+    for p in [start.parent] + list(start.parents):
+        if (p / "streamlit_app.py").exists():
+            return p
+    return Path.cwd()
 
-try:
-    from app.lib.auth import login, show_logout
-except Exception:
-    def login(required: bool = False):
-        class _Auth:
-            ok = True
-            authenticated = True
-        return _Auth()
+def _fallback_american_to_decimal(odds):
+    if odds is None or pd.isna(odds):
+        return np.nan
+    try:
+        o = float(odds)
+    except Exception:
+        return np.nan
+    if o > 0:
+        return 1.0 + o / 100.0
+    if o < 0:
+        return 1.0 + 100.0 / abs(o)
+    return np.nan
 
-    def show_logout():
-        return None
-
-try:
-    from app.lib.access import premium_enabled
-except Exception:
-    def premium_enabled() -> bool:
-        return True
-
-try:
-    from app.utils.nudge import begin_session, touch_session, session_duration_str, bump_usage, show_nudge
-except Exception:
-    def begin_session(): return None
-    def touch_session(): return None
-    def session_duration_str(): return ""
-    def bump_usage(*args, **kwargs): return None
-    def show_nudge(*args, **kwargs): return None
-
-import importlib.util
+def _fallback_apply_clv_columns(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    if "clv" not in out.columns:
+        out["clv"] = np.nan
+    if "beat_closing" not in out.columns:
+        out["beat_closing"] = np.nan
+    return out
 
 def _load_clv_helper():
-    try:
-        from app.utils.clv import apply_clv_columns, american_to_decimal
-        return apply_clv_columns, american_to_decimal
-    except Exception:
-        pass
+    for mod_name in ("app.utils.clv", "utils.clv"):
+        try:
+            mod = __import__(mod_name, fromlist=["apply_clv_columns", "american_to_decimal"])
+            fn1 = getattr(mod, "apply_clv_columns", None)
+            fn2 = getattr(mod, "american_to_decimal", None)
+            if callable(fn1) and callable(fn2):
+                return fn1, fn2
+        except Exception:
+            pass
 
-    try:
-        from utils.clv import apply_clv_columns, american_to_decimal
-        return apply_clv_columns, american_to_decimal
-    except Exception:
-        pass
+    repo_root = _find_repo_root(HERE)
+    candidates = [
+        repo_root / "utils" / "clv.py",
+        repo_root / "app" / "utils" / "clv.py",
+    ]
 
-    app_dir = HERE.parents[1]   # .../app
-    clv_path = app_dir / "utils" / "clv.py"
-    if not clv_path.exists():
-        raise ModuleNotFoundError(f"CLV helper not found at {clv_path}")
+    for clv_path in candidates:
+        try:
+            if not clv_path.exists():
+                continue
+            spec = importlib.util.spec_from_file_location("calculated_risk_clv", clv_path)
+            if spec is None or spec.loader is None:
+                continue
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            fn1 = getattr(mod, "apply_clv_columns", None)
+            fn2 = getattr(mod, "american_to_decimal", None)
+            if callable(fn1) and callable(fn2):
+                return fn1, fn2
+        except Exception:
+            pass
 
-    spec = importlib.util.spec_from_file_location("edgefinder_clv", clv_path)
-    if spec is None or spec.loader is None:
-        raise ModuleNotFoundError(f"Could not load CLV helper from {clv_path}")
-
-    clv_mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = clv_mod
-    spec.loader.exec_module(clv_mod)
-
-    return clv_mod.apply_clv_columns, clv_mod.american_to_decimal
-
+    return _fallback_apply_clv_columns, _fallback_american_to_decimal
 
 apply_clv_columns, american_to_decimal = _load_clv_helper()
 
+apply_clv_columns, american_to_decimal = _load_clv_helper()
+
+
+# -----------------------------------------------------------------------------
+# Page setup
+# -----------------------------------------------------------------------------
 st.set_page_config(page_title="93 • Analytics", page_icon="📊", layout="wide")
 require_eligibility(min_age=18, restricted_states={"WA", "ID", "NV"})
 
@@ -92,37 +88,71 @@ if not getattr(auth, "ok", True):
 if not getattr(auth, "authenticated", True):
     st.info("You are in read-only mode.")
 show_logout()
-begin_session(); touch_session(); bump_usage("page_visit")
-show_nudge(feature="analytics", metric="page_visit", threshold=10, period="1D", demo_unlock=True, location="inline")
+
+begin_session()
+touch_session()
+bump_usage("page_visit")
+show_nudge(
+    feature="analytics",
+    metric="page_visit",
+    threshold=10,
+    period="1D",
+    demo_unlock=True,
+    location="inline",
+)
+
 if hasattr(st, "sidebar"):
     st.sidebar.caption(f"🕒 Session: {session_duration_str()}")
+
 if not premium_enabled():
     st.warning("Premium-only page running in limited mode.")
 
 
+# -----------------------------------------------------------------------------
+# Data loading
+# -----------------------------------------------------------------------------
 def repo_root() -> Path:
     env = os.environ.get("EDGE_FINDER_ROOT") or os.environ.get("EDGE_EXPORTS_ROOT")
     if env:
         return Path(env)
+
+    discovered = _find_repo_root(HERE)
+    if discovered.exists():
+        return discovered
+
     for p in [HERE.parent, *HERE.parents]:
         if (p / "exports").exists() or (p / "data").exists():
             return p
+
     return Path.cwd()
 
 
 def candidate_files() -> list[Path]:
     root = repo_root()
-    folders = [root / "exports", root / "data", HERE.parent, Path.cwd() / "exports"]
-    names = [
-        "master_likes.parquet", "master_likes.csv", "history.csv", "history.parquet",
-        "your_history.csv", "your_history.parquet", "settled.csv", "settled.parquet",
+    folders = [
+        root / "exports",
+        root / "data",
+        HERE.parent,
+        Path.cwd() / "exports",
     ]
+    names = [
+        "master_likes.parquet",
+        "master_likes.csv",
+        "history.csv",
+        "history.parquet",
+        "your_history.csv",
+        "your_history.parquet",
+        "settled.csv",
+        "settled.parquet",
+    ]
+
     out: list[Path] = []
     for folder in folders:
         for name in names:
             path = folder / name
             if path.exists():
                 out.append(path)
+
     return sorted(set(out))
 
 
@@ -156,19 +186,30 @@ def normalize_result(value: object) -> str:
 def prepare(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
+
     out = df.copy()
     out.columns = [str(c) for c in out.columns]
 
     alias = {
-        "date": "timestamp", "placed_at": "timestamp", "created_at": "timestamp",
-        "bet_line": "line_at_pick", "line": "line_at_pick", "odds": "payout_odds",
-        "book_name": "book", "sportsbook": "book", "pick_side": "side", "bet_side": "side",
+        "date": "timestamp",
+        "placed_at": "timestamp",
+        "created_at": "timestamp",
+        "bet_line": "line_at_pick",
+        "line": "line_at_pick",
+        "odds": "payout_odds",
+        "book_name": "book",
+        "sportsbook": "book",
+        "pick_side": "side",
+        "bet_side": "side",
     }
     for old, new in alias.items():
         if old in out.columns and new not in out.columns:
             out[new] = out[old]
 
-    out["timestamp"] = pd.to_datetime(_first_existing(out, ["timestamp", "commence_time", "game_date"]), errors="coerce")
+    out["timestamp"] = pd.to_datetime(
+        _first_existing(out, ["timestamp", "commence_time", "game_date"]),
+        errors="coerce",
+    )
     out["season"] = pd.to_numeric(_first_existing(out, ["season"]), errors="coerce")
     out["week"] = pd.to_numeric(_first_existing(out, ["week"]), errors="coerce")
     out["market"] = _first_existing(out, ["market", "market_type"], "").astype("string")
@@ -184,24 +225,41 @@ def prepare(df: pd.DataFrame) -> pd.DataFrame:
     out["edge"] = pd.to_numeric(_first_existing(out, ["edge", "expected_edge", "realized_edge"]), errors="coerce")
     out["result"] = _first_existing(out, ["result", "outcome"], "").map(normalize_result)
     out["hit_bool"] = pd.to_numeric(_first_existing(out, ["hit_bool"]), errors="coerce")
+
     needs = out["hit_bool"].isna()
-    out.loc[needs, "hit_bool"] = np.where(out.loc[needs, "result"].eq("win"), 1.0, np.where(out.loc[needs, "result"].eq("loss"), 0.0, np.nan))
+    out.loc[needs, "hit_bool"] = np.where(
+        out.loc[needs, "result"].eq("win"),
+        1.0,
+        np.where(out.loc[needs, "result"].eq("loss"), 0.0, np.nan),
+    )
+
     out["decimal_odds"] = pd.to_numeric(_first_existing(out, ["decimal_odds"]), errors="coerce")
     miss = out["decimal_odds"].isna()
     out.loc[miss, "decimal_odds"] = out.loc[miss, "payout_odds"].apply(american_to_decimal)
-    return apply_clv_columns(out)
+
+    out = apply_clv_columns(out)
+
+    if "clv" not in out.columns:
+        out["clv"] = np.nan
+    if "beat_closing" not in out.columns:
+        out["beat_closing"] = np.nan
+
+    return out
 
 
 @st.cache_data(show_spinner=False)
 def load_data() -> pd.DataFrame:
     frames = [prepare(read_any(path)) for path in candidate_files()]
     frames = [f for f in frames if not f.empty]
+
     if not frames:
         return pd.DataFrame()
+
     data = pd.concat(frames, ignore_index=True, sort=False)
     subset = [c for c in ["timestamp", "home", "away", "market", "side", "book"] if c in data.columns]
     if subset:
         data = data.drop_duplicates(subset=subset)
+
     return data.sort_values("timestamp", ascending=False, na_position="last")
 
 
@@ -209,6 +267,7 @@ def roi_flat_stake(df: pd.DataFrame) -> float:
     settled = df[df["hit_bool"].notna()].copy()
     if settled.empty:
         return float("nan")
+
     dec = pd.to_numeric(settled["decimal_odds"], errors="coerce").fillna(1.909)
     wins = pd.to_numeric(settled["hit_bool"], errors="coerce").fillna(0.0)
     profits = np.where(wins == 1.0, dec - 1.0, np.where(wins == 0.0, -1.0, 0.0))
@@ -222,12 +281,18 @@ def brier_score(df: pd.DataFrame) -> float:
     return float(np.mean((use["model_prob"].astype(float) - use["hit_bool"].astype(float)) ** 2))
 
 
+# -----------------------------------------------------------------------------
+# UI
+# -----------------------------------------------------------------------------
 st.title("📊 Analytics")
-st.caption("Clean rebuild using shared app/utils/clv.py, tolerant loaders, and safe empty-state behavior.")
+st.caption("Analytics dashboard with tolerant loaders and cloud-safe fallback behavior.")
 
 df = load_data()
 if df.empty:
-    st.warning("No analytics dataset found yet. Add master_likes.parquet, history.csv, your_history.csv, or settled.csv to exports/ or data/.")
+    st.warning(
+        "No analytics dataset found yet. Add master_likes.parquet, history.csv, "
+        "your_history.csv, or settled.csv to exports/ or data/."
+    )
     st.dataframe(pd.DataFrame(columns=["timestamp", "market", "side", "book", "result", "clv"]))
     st.stop()
 
@@ -252,9 +317,9 @@ count = len(work)
 wr = float(work["hit_bool"].dropna().mean()) if work["hit_bool"].notna().any() else float("nan")
 roi = roi_flat_stake(work)
 clv = float(work["clv"].dropna().mean()) if work["clv"].notna().any() else float("nan")
-beat = float(work["beat_closing"].dropna().mean()) if work["beat_closing"].notna().any() else float("nan")
 brier = brier_score(work)
 mean_edge = float(work["edge"].dropna().mean()) if work["edge"].notna().any() else float("nan")
+
 c1.metric("Rows", f"{count:,}")
 c2.metric("Win rate", "—" if np.isnan(wr) else f"{wr:.1%}")
 c3.metric("ROI / pick", "—" if np.isnan(roi) else f"{roi:.1%}")
@@ -281,12 +346,17 @@ else:
     st.dataframe(market_summary, use_container_width=True)
 
 col_l, col_r = st.columns(2)
+
 with col_l:
     st.subheader("Summary by book")
     if "book" in work.columns and not work.empty:
         book_summary = (
             work.groupby("book", dropna=False)
-            .agg(picks=("book", "size"), win_rate=("hit_bool", "mean"), avg_clv=("clv", "mean"))
+            .agg(
+                picks=("book", "size"),
+                win_rate=("hit_bool", "mean"),
+                avg_clv=("clv", "mean"),
+            )
             .reset_index()
             .sort_values("picks", ascending=False)
         )
@@ -309,9 +379,27 @@ with col_r:
 
 st.subheader("Filtered dataset")
 show_cols = [
-    c for c in [
-        "timestamp", "season", "week", "home", "away", "market", "side", "book", "line_at_pick",
-        "closing_line", "payout_odds", "closing_odds", "model_prob", "edge", "result", "hit_bool", "clv", "beat_closing"
-    ] if c in work.columns
+    c
+    for c in [
+        "timestamp",
+        "season",
+        "week",
+        "home",
+        "away",
+        "market",
+        "side",
+        "book",
+        "line_at_pick",
+        "closing_line",
+        "payout_odds",
+        "closing_odds",
+        "model_prob",
+        "edge",
+        "result",
+        "hit_bool",
+        "clv",
+        "beat_closing",
+    ]
+    if c in work.columns
 ]
 st.dataframe(work[show_cols], use_container_width=True, hide_index=True)

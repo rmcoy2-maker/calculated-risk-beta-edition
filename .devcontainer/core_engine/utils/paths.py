@@ -1,0 +1,23 @@
+from pathlib import Path
+
+# ...\edge-finder
+ROOT = Path(__file__).resolve().parents[2]
+
+# where the UI reads/writes edges.csv
+EXPORTS_DIR = ROOT / "serving_ui" / "exports"
+
+# simple defaults for demo
+MODEL_DIR = ROOT / "models"
+DB_DIR    = ROOT / "db"
+
+def ensure_dirs():
+    for p in (EXPORTS_DIR, MODEL_DIR, DB_DIR):
+        p.mkdir(parents=True, exist_ok=True)
+
+
+SEED_DIR = ROOT / "seeds"
+
+
+
+
+
