@@ -70,6 +70,7 @@ except Exception:
 from pathlib import Path
 import streamlit as st
 
+# ------------------ Data Loading ------------------
 def _repo_root() -> Path:
     here = Path(__file__).resolve()
     for p in [here.parent] + list(here.parents):
@@ -79,7 +80,6 @@ def _repo_root() -> Path:
 
 
 def _exports_dir() -> Path:
-    # Secret override if you ever want one
     try:
         env_val = st.secrets.get("EDGE_EXPORTS_DIR", "")
     except Exception:
@@ -96,6 +96,104 @@ def _exports_dir() -> Path:
         return repo_exports
 
     return repo_exports
+
+
+def _pick_latest_file(root: Path, preferred_names: list[str], glob_patterns: list[str]) -> Path | None:
+    matches: list[Path] = []
+
+    for name in preferred_names:
+        p = root / name
+        if p.exists() and p.is_file():
+            matches.append(p)
+
+    for pattern in glob_patterns:
+        matches.extend([p for p in root.glob(pattern) if p.is_file()])
+
+    if not matches:
+        return None
+
+    uniq = {str(p.resolve()): p for p in matches}
+    return max(uniq.values(), key=lambda p: p.stat().st_mtime)
+
+
+def _safe_read_csv(path: Path | None, label: str) -> pd.DataFrame:
+    if path is None:
+        st.warning(f"{label} file not found in exports/.")
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_csv(path, low_memory=False, encoding="utf-8-sig")
+        df.attrs["source_path"] = str(path)
+        return df
+    except Exception as e:
+        st.warning(f"Could not load {label} file `{path.name}`: {e}")
+        return pd.DataFrame()
+
+
+@st.cache_data(show_spinner=False)
+def load_data():
+    root = _exports_dir()
+
+    st.write("Using exports dir:", str(root))
+    st.write("Files in exports:", sorted([p.name for p in root.glob("*")]))
+
+    edges_path = _pick_latest_file(
+        root,
+        preferred_names=[
+            "edges_standardized.csv",
+            "edges_graded_full_normalized_std.csv",
+            "edges_graded_full.csv",
+            "edges_normalized.csv",
+            "edges.csv",
+        ],
+        glob_patterns=[
+            "*edges*standardized*.csv",
+            "*edges*normalized*.csv",
+            "*edges*graded*.csv",
+            "*edges*.csv",
+        ],
+    )
+
+    scores_path = _pick_latest_file(
+        root,
+        preferred_names=[
+            "games_master_template.csv",
+            "scores_1966-2025.csv",
+            "scores_1966-2025_merged.csv",
+            "scores_1966-2025_merged_unmatched.csv",
+            "_backup_scores_1966-2025.csv",
+            "scores_normalized_std.csv",
+            "scores_normalized.csv",
+            "scores.csv",
+        ],
+        glob_patterns=[
+            "*games_master_template*.csv",
+            "*scores_1966-2025*.csv",
+            "*scores*normalized*.csv",
+            "*scores*.csv",
+        ],
+    )
+
+    odds_path = _pick_latest_file(
+        root,
+        preferred_names=[
+            "games_with_odds.csv",
+            "odds_lines_all.csv",
+            "odds.csv",
+            "lines.csv",
+        ],
+        glob_patterns=[
+            "*games_with_odds*.csv",
+            "*odds*.csv",
+            "*lines*.csv",
+        ],
+    )
+
+    edges = _safe_read_csv(edges_path, "Edges") if edges_path else pd.DataFrame()
+    scores = _safe_read_csv(scores_path, "Scores")
+    odds = _safe_read_csv(odds_path, "Odds") if odds_path else pd.DataFrame()
+
+    return edges, scores, odds
 
 
 # ------------------ Page Config ------------------
