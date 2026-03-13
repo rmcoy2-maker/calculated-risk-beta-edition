@@ -31,6 +31,7 @@ except Exception:
             authenticated = True
             username = None
         return _Auth()
+
     def show_logout():
         return None
 
@@ -50,25 +51,41 @@ try:
     from app.utils.parlay_cart import read_cart, add_to_cart, clear_cart
 except Exception:
     import pandas as _shim_pd
+
     def read_cart():
         return _shim_pd.DataFrame()
+
     def add_to_cart(*args, **kwargs):
         return None
+
     def clear_cart():
         return None
 
 try:
     from app.utils.nudge import begin_session, touch_session, session_duration_str, bump_usage, show_nudge
 except Exception:
-    def begin_session(): return None
-    def touch_session(): return None
-    def session_duration_str(): return ""
-    def bump_usage(*args, **kwargs): return None
-    def show_nudge(*args, **kwargs): return None
+    def begin_session():
+        return None
+
+    def touch_session():
+        return None
+
+    def session_duration_str():
+        return ""
+
+    def bump_usage(*args, **kwargs):
+        return None
+
+    def show_nudge(*args, **kwargs):
+        return None
 # ---- /recovered app shims ----
 
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
 import streamlit as st
+
 
 # ------------------ Data Loading ------------------
 def _repo_root() -> Path:
@@ -135,7 +152,10 @@ def load_data():
     root = _exports_dir()
 
     st.write("Using exports dir:", str(root))
-    st.write("Files in exports:", sorted([p.name for p in root.glob("*")]))
+    if root.exists():
+        st.write("Files in exports:", sorted([p.name for p in root.glob("*")]))
+    else:
+        st.write("Files in exports:", [])
 
     edges_path = _pick_latest_file(
         root,
@@ -233,7 +253,14 @@ touch_session()
 if hasattr(st, "sidebar"):
     st.sidebar.caption(f"🕒 Session: {session_duration_str()}")
 bump_usage("page_visit")
-show_nudge(feature="analytics", metric="page_visit", threshold=10, period="1D", demo_unlock=True, location="inline")
+show_nudge(
+    feature="analytics",
+    metric="page_visit",
+    threshold=10,
+    period="1D",
+    demo_unlock=True,
+    location="inline",
+)
 # === /Nudge+Session ===
 
 
@@ -256,11 +283,11 @@ FEATURES_BY_TIER = {
             "ppg_basic", "pa_basic", "mov_basic",
             "ppg_volatility", "pa_volatility", "mov_volatility",
             "mol_basic", "ats_overall", "ats_covered_win_loss",
-            "splits_home_away", "splits_fav_dog", "csv_export"
+            "splits_home_away", "splits_fav_dog", "csv_export",
         },
         "market": {
             "matchup_ctx_basic", "market_ats_simple", "market_similar_spots",
-            "distributions", "alerts"
+            "distributions", "alerts",
         },
         "shared": {"api_access", "download_table", "export_csv"},
     },
@@ -320,14 +347,14 @@ def _ensure_home_away_columns(df: pd.DataFrame) -> pd.DataFrame:
         "home", "home_team", "team_home",
         "HomeTeam", "Home_Team",
         "homeName", "Home", "HOME",
-        "host", "home_name", "team1_home", "homeTeam"
+        "host", "home_name", "team1_home", "homeTeam",
     )
     away = _pick_ci(
         out,
         "away", "away_team", "team_away",
         "AwayTeam", "Away_Team",
         "awayName", "Away", "AWAY",
-        "visitor", "away_name", "team1_away", "awayTeam"
+        "visitor", "away_name", "team1_away", "awayTeam",
     )
 
     if home.isna().all() or (home.astype("string").fillna("").str.strip() == "").all():
@@ -373,7 +400,7 @@ def _ensure_score_columns(df: pd.DataFrame) -> pd.DataFrame:
         _pick_ci(
             out,
             "home_score", "HomeScore", "Home_Score",
-            "score_home", "final_home", "home_points", "home_pts"
+            "score_home", "final_home", "home_points", "home_pts",
         ),
         errors="coerce",
     )
@@ -382,7 +409,7 @@ def _ensure_score_columns(df: pd.DataFrame) -> pd.DataFrame:
         _pick_ci(
             out,
             "away_score", "AwayScore", "Away_Score",
-            "score_away", "final_away", "away_points", "away_pts"
+            "score_away", "final_away", "away_points", "away_pts",
         ),
         errors="coerce",
     )
@@ -460,129 +487,6 @@ def _season_values_from_scores(df: pd.DataFrame) -> list[int]:
     return sorted(years.dropna().astype(int).unique().tolist())
 
 
-# ------------------ Data Loading ------------------
-def _exports_dir() -> Path:
-    env_val = ""
-    try:
-        env_val = st.secrets.get("EDGE_EXPORTS_DIR", "")
-    except Exception:
-        env_val = ""
-
-    if str(env_val).strip():
-        p = Path(str(env_val).strip())
-        p.mkdir(parents=True, exist_ok=True)
-        return p
-
-    here = Path(__file__).resolve()
-    for up in [here.parent] + list(here.parents):
-        if (up / "exports").exists():
-            return up / "exports"
-        if up.name.lower() == "edge-finder":
-            p = up / "exports"
-            p.mkdir(parents=True, exist_ok=True)
-            return p
-
-    p = here.parent / "exports"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-
-def _pick_latest_file(root: Path, preferred_names: list[str], glob_patterns: list[str]) -> Path | None:
-    matches: list[Path] = []
-
-    for name in preferred_names:
-        p = root / name
-        if p.exists() and p.is_file():
-            matches.append(p)
-
-    for pattern in glob_patterns:
-        matches.extend([p for p in root.glob(pattern) if p.is_file()])
-
-    if not matches:
-        return None
-
-    uniq = {str(p.resolve()): p for p in matches}
-    return max(uniq.values(), key=lambda p: p.stat().st_mtime)
-
-
-def _safe_read_csv(path: Path | None, label: str) -> pd.DataFrame:
-    if path is None:
-        st.warning(f"{label} file not found in exports/.")
-        return pd.DataFrame()
-
-    try:
-        df = pd.read_csv(path, low_memory=False, encoding="utf-8-sig")
-        df.attrs["source_path"] = str(path)
-        return df
-    except Exception as e:
-        st.warning(f"Could not load {label} file `{path.name}`: {e}")
-        return pd.DataFrame()
-
-
-@st.cache_data(show_spinner=False)
-def load_data():
-    root = _exports_dir()
-st.write("Using exports dir:", str(root))
-st.write("Files in exports:", sorted([p.name for p in root.glob("*")]))
-    edges_path = _pick_latest_file(
-        root,
-        preferred_names=[
-            "edges_standardized.csv",
-            "edges_graded_full_normalized_std.csv",
-            "edges_graded_full.csv",
-            "edges_normalized.csv",
-            "edges.csv",
-        ],
-        glob_patterns=[
-            "*edges*standardized*.csv",
-            "*edges*normalized*.csv",
-            "*edges*graded*.csv",
-            "*edges*.csv",
-        ],
-    )
-
-    scores_path = _pick_latest_file(
-    root,
-    preferred_names=[
-        "games_master_template.csv",
-        "scores_1966-2025.csv",
-        "scores_1966-2025_merged.csv",
-        "scores_1966-2025_merged_unmatched.csv",
-        "_backup_scores_1966-2025.csv",
-        "scores_normalized_std.csv",
-        "scores_normalized.csv",
-        "scores.csv",
-    ],
-    glob_patterns=[
-        "*games_master_template*.csv",
-        "*scores_1966-2025*.csv",
-        "*scores*normalized*.csv",
-        "*scores*.csv",
-    ],
-)
-
-    odds_path = _pick_latest_file(
-        root,
-        preferred_names=[
-            "games_with_odds.csv",
-            "odds_lines_all.csv",
-            "odds.csv",
-            "lines.csv",
-        ],
-        glob_patterns=[
-            "*games_with_odds*.csv",
-            "*odds*.csv",
-            "*lines*.csv",
-        ],
-    )
-
-    edges = _safe_read_csv(edges_path, "Edges") if edges_path else pd.DataFrame()
-    scores = _safe_read_csv(scores_path, "Scores")
-    odds = _safe_read_csv(odds_path, "Odds") if odds_path else pd.DataFrame()
-
-    return edges, scores, odds
-
-
 edges, scores, odds = load_data()
 
 # ------------------ Scores normalization ------------------
@@ -642,15 +546,17 @@ def normalize_scores(sc: pd.DataFrame) -> pd.DataFrame:
     if {"spread_home", "margin_home"}.issubset(sc.columns):
         sc["_home_spread_result"] = sc["margin_home"] + sc["spread_home"]
         sc["home_cover"] = np.where(
-            sc["_home_spread_result"] > 0, 1,
-            np.where(sc["_home_spread_result"] < 0, 0, 0.5)
+            sc["_home_spread_result"] > 0,
+            1,
+            np.where(sc["_home_spread_result"] < 0, 0, 0.5),
         )
         sc["_home_cover"] = sc["home_cover"]
 
     if {"total_close", "total_points"}.issubset(sc.columns):
         sc["over_result"] = np.where(
-            sc["total_points"] > sc["total_close"], 1,
-            np.where(sc["total_points"] < sc["total_close"], 0, 0.5)
+            sc["total_points"] > sc["total_close"],
+            1,
+            np.where(sc["total_points"] < sc["total_close"], 0, 0.5),
         )
         sc["_total_over"] = sc["over_result"]
 
@@ -738,10 +644,7 @@ def team_profile(sc: pd.DataFrame, team: str, seasons: list[int] | None = None) 
     out["summary"] = agg
 
     split_tables = {}
-    for label, filt in [
-        ("Home", df["_is_home"] == 1),
-        ("Away", df["_is_home"] == 0),
-    ]:
+    for label, filt in [("Home", df["_is_home"] == 1), ("Away", df["_is_home"] == 0)]:
         part = df.loc[filt]
         if len(part) == 0:
             continue
@@ -782,8 +685,8 @@ def market_context(sc: pd.DataFrame, home: str, away: str, season: int | None, l
     out = {"game_rows": len(game)}
 
     h2h = df[
-        ((df["home"] == home) & (df["away"] == away)) |
-        ((df["home"] == away) & (df["away"] == home))
+        ((df["home"] == home) & (df["away"] == away))
+        | ((df["home"] == away) & (df["away"] == home))
     ]
     out["h2h_games"] = len(h2h)
 
@@ -861,22 +764,24 @@ if mode == "Team Profile":
 
     cols_to_show = ["games"] + basic_cols + adv_cols + prem_cols
 
-    show = summary[summary.index.isin(cols_to_show)].rename({
-        "games": "Games",
-        "ppg_mean": "PPG (mean)",
-        "ppg_std": "PPG (std)",
-        "papg_mean": "PA (mean)",
-        "papg_std": "PA (std)",
-        "mov_mean": "MOV (mean)",
-        "mov_std": "MOV (std)",
-        "mol_mean": "MOL (mean)",
-        "mol_std": "MOL (std)",
-        "ats_cover_pct": "ATS Cover %",
-        "covered_win_pct": "Covered Win %",
-        "covered_loss_pct": "Covered Loss %",
-        "over_pct": "Over %",
-        "under_pct": "Under %",
-    })
+    show = summary[summary.index.isin(cols_to_show)].rename(
+        {
+            "games": "Games",
+            "ppg_mean": "PPG (mean)",
+            "ppg_std": "PPG (std)",
+            "papg_mean": "PA (mean)",
+            "papg_std": "PA (std)",
+            "mov_mean": "MOV (mean)",
+            "mov_std": "MOV (std)",
+            "mol_mean": "MOL (mean)",
+            "mol_std": "MOL (std)",
+            "ats_cover_pct": "ATS Cover %",
+            "covered_win_pct": "Covered Win %",
+            "covered_loss_pct": "Covered Loss %",
+            "over_pct": "Over %",
+            "under_pct": "Under %",
+        }
+    )
 
     st.dataframe(show.to_frame("Value"), width="stretch")
 
@@ -899,9 +804,7 @@ else:
 
     home = c1.selectbox("Home", homes, index=0)
 
-    away_options = sorted(
-        scores.loc[scores["home"] == home, "away"].dropna().astype(str).unique().tolist()
-    )
+    away_options = sorted(scores.loc[scores["home"] == home, "away"].dropna().astype(str).unique().tolist())
     if not away_options:
         away_options = sorted(scores["away"].dropna().astype(str).unique().tolist())
 
@@ -925,17 +828,21 @@ else:
     )
 
     st.subheader("Matchup Context")
-    st.write({
-        "Rows (exact home/away matchup)": ctx.get("game_rows", 0),
-        "Rows (all H2H in data)": ctx.get("h2h_games", 0),
-    })
+    st.write(
+        {
+            "Rows (exact home/away matchup)": ctx.get("game_rows", 0),
+            "Rows (all H2H in data)": ctx.get("h2h_games", 0),
+        }
+    )
 
     if has_feature(tier, "market", "market_ats_simple") and market == "spread":
         st.markdown("#### Similar Spots")
-        st.write({
-            "Similar-spot rows (±1.0 around line)": ctx.get("similar_spot_count"),
-            "Home side cover % in similar spots (no pushes)": ctx.get("similar_cover_pct_home_side"),
-        })
+        st.write(
+            {
+                "Similar-spot rows (±1.0 around line)": ctx.get("similar_spot_count"),
+                "Home side cover % in similar spots (no pushes)": ctx.get("similar_cover_pct_home_side"),
+            }
+        )
 
     if has_feature(tier, "market", "distributions"):
         st.info("Premium: distribution plots of margins/total results would render here.")
