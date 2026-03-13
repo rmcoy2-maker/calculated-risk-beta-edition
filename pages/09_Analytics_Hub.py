@@ -68,10 +68,34 @@ except Exception:
 # ---- /recovered app shims ----
 
 from pathlib import Path
-
-import numpy as np
-import pandas as pd
 import streamlit as st
+
+def _repo_root() -> Path:
+    here = Path(__file__).resolve()
+    for p in [here.parent] + list(here.parents):
+        if (p / "streamlit_app.py").exists():
+            return p
+    return Path.cwd()
+
+
+def _exports_dir() -> Path:
+    # Secret override if you ever want one
+    try:
+        env_val = st.secrets.get("EDGE_EXPORTS_DIR", "")
+    except Exception:
+        env_val = ""
+
+    if str(env_val).strip():
+        p = Path(str(env_val).strip())
+        if p.exists() and p.is_dir():
+            return p
+
+    repo = _repo_root()
+    repo_exports = repo / "exports"
+    if repo_exports.exists() and repo_exports.is_dir():
+        return repo_exports
+
+    return repo_exports
 
 
 # ------------------ Page Config ------------------
@@ -400,7 +424,8 @@ def _safe_read_csv(path: Path | None, label: str) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def load_data():
     root = _exports_dir()
-
+st.write("Using exports dir:", str(root))
+st.write("Files in exports:", sorted([p.name for p in root.glob("*")]))
     edges_path = _pick_latest_file(
         root,
         preferred_names=[
@@ -419,22 +444,24 @@ def load_data():
     )
 
     scores_path = _pick_latest_file(
-        root,
-        preferred_names=[
-            "games_master_template.csv",
-            "scores_1966-2025.csv",
-            "_backup_scores_1966-2025.csv",
-            "scores_normalized_std.csv",
-            "scores_normalized.csv",
-            "scores.csv",
-        ],
-        glob_patterns=[
-            "*games_master_template*.csv",
-            "*scores_1966-2025*.csv",
-            "*scores*normalized*.csv",
-            "*scores*.csv",
-        ],
-    )
+    root,
+    preferred_names=[
+        "games_master_template.csv",
+        "scores_1966-2025.csv",
+        "scores_1966-2025_merged.csv",
+        "scores_1966-2025_merged_unmatched.csv",
+        "_backup_scores_1966-2025.csv",
+        "scores_normalized_std.csv",
+        "scores_normalized.csv",
+        "scores.csv",
+    ],
+    glob_patterns=[
+        "*games_master_template*.csv",
+        "*scores_1966-2025*.csv",
+        "*scores*normalized*.csv",
+        "*scores*.csv",
+    ],
+)
 
     odds_path = _pick_latest_file(
         root,
