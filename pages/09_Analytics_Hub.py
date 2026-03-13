@@ -29,6 +29,7 @@ except Exception:
         class _Auth:
             ok = True
             authenticated = True
+            username = None
         return _Auth()
     def show_logout():
         return None
@@ -76,6 +77,32 @@ import streamlit as st
 # ------------------ Page Config ------------------
 st.set_page_config(page_title="Analytics Hub — Team & Market", layout="wide")
 require_eligibility(min_age=18, restricted_states={"WA", "ID", "NV"})
+
+
+# ------------------ Auth / Session ------------------
+auth = login(required=False)
+if not getattr(auth, "ok", True):
+    st.stop()
+
+show_logout()
+
+if "user" not in st.session_state:
+    st.session_state["user"] = None
+if "username" not in st.session_state:
+    st.session_state["username"] = None
+if "auth" not in st.session_state:
+    st.session_state["auth"] = {}
+
+auth_dict = st.session_state.get("auth", {}) or {}
+auth_username = getattr(auth, "username", None) or auth_dict.get("username")
+
+if auth_username and not st.session_state.get("user"):
+    st.session_state["user"] = auth_username
+if auth_username and not st.session_state.get("username"):
+    st.session_state["username"] = auth_username
+if auth_username and "username" not in auth_dict:
+    auth_dict["username"] = auth_username
+    st.session_state["auth"] = auth_dict
 
 
 # === Nudge+Session ===
@@ -433,25 +460,6 @@ def load_data():
 
 edges, scores, odds = load_data()
 
-# ---------------------------
-# Derived game metrics
-# ---------------------------
-
-if "home_score" in scores.columns and "away_score" in scores.columns:
-
-    scores["margin_home"] = scores["home_score"] - scores["away_score"]
-    scores["total_points"] = scores["home_score"] + scores["away_score"]
-
-if "spread_home" in scores.columns:
-    scores["home_cover"] = (scores["margin_home"] + scores["spread_home"]) > 0
-
-if "total_close" in scores.columns:
-    scores["over_result"] = scores["total_points"] > scores["total_close"]
-scores["away_cover"] = scores["margin_home"] + scores["spread_home"] < 0
-scores["under_result"] = scores["total_points"] < scores["total_close"]
-# ------------------ Scores normalization ------------------
-edges, scores, odds = load_data()
-
 # ------------------ Scores normalization ------------------
 if scores is None or scores.empty:
     st.error("No scores file could be loaded from exports/. Analytics Hub needs at least one scores CSV.")
@@ -479,6 +487,53 @@ scores = _ensure_numeric_column(
     "ou_line",
 )
 
+if {"home_score", "away_score"}.issubset(scores.columns):
+    scores["margin_home"] = scores["home_score"] - scores["away_score"]
+    scores["total_points"] = scores["home_score"] + scores["away_score"]
+
+if {"margin_home", "spread_home"}.issubset(scores.columns):
+    scores["home_cover"] = (scores["margin_home"] + scores["spread_home"]) > 0
+    scores["away_cover"] = (scores["margin_home"] + scores["spread_home"]) < 0
+
+if {"total_points", "total_close"}.issubset(scores.columns):
+    scores["over_result"] = scores["total_points"] > scores["total_close"]
+    scores["under_result"] = scores["total_points"] < scores["total_close"]
+
+
+def normalize_scores(sc: pd.DataFrame) -> pd.DataFrame:
+    sc = sc.copy()
+
+    if "date" not in sc.columns and "_date_iso" in sc.columns:
+        sc["date"] = pd.to_datetime(sc["_date_iso"], errors="coerce").dt.strftime("%Y-%m-%d")
+    elif "date" in sc.columns:
+        sc["date"] = pd.to_datetime(sc["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+
+    if {"home_score", "away_score"}.issubset(sc.columns):
+        sc["margin_home"] = sc["home_score"] - sc["away_score"]
+        sc["total_points"] = sc["home_score"] + sc["away_score"]
+        sc["_margin_home"] = sc["margin_home"]
+        sc["_total_points"] = sc["total_points"]
+
+    if {"spread_home", "margin_home"}.issubset(sc.columns):
+        sc["_home_spread_result"] = sc["margin_home"] + sc["spread_home"]
+        sc["home_cover"] = np.where(
+            sc["_home_spread_result"] > 0, 1,
+            np.where(sc["_home_spread_result"] < 0, 0, 0.5)
+        )
+        sc["_home_cover"] = sc["home_cover"]
+
+    if {"total_close", "total_points"}.issubset(sc.columns):
+        sc["over_result"] = np.where(
+            sc["total_points"] > sc["total_close"], 1,
+            np.where(sc["total_points"] < sc["total_close"], 0, 0.5)
+        )
+        sc["_total_over"] = sc["over_result"]
+
+    return sc
+
+
+scores = normalize_scores(scores)
+
 teams_home = sorted(scores["home"].dropna().astype(str).unique().tolist()) if "home" in scores.columns else []
 teams_away = sorted(scores["away"].dropna().astype(str).unique().tolist()) if "away" in scores.columns else []
 teams = sorted(set(teams_home).union(set(teams_away)))
@@ -486,59 +541,13 @@ teams = sorted(set(teams_home).union(set(teams_away)))
 if not teams:
     st.error("Scores file loaded, but no usable home/away team columns were found.")
     st.write("Detected columns:", list(scores.columns))
-    st.dataframe(scores.head(10), use_container_width=True)
+    st.dataframe(scores.head(10), width="stretch")
     st.stop()
 
 all_seasons = _season_values_from_scores(scores)
 if not all_seasons:
     all_seasons = ["All"]
 
-
-def normalize_scores(sc: pd.DataFrame) -> pd.DataFrame:
-    sc = sc.copy()
-
-    # normalize date again if alternate lowercase source exists
-    if "date" not in sc.columns and "_date_iso" in sc.columns:
-        sc["date"] = pd.to_datetime(sc["_date_iso"], errors="coerce").dt.strftime("%Y-%m-%d")
-    elif "date" in sc.columns:
-        sc["date"] = pd.to_datetime(sc["date"], errors="coerce").dt.strftime("%Y-%m-%d")
-
-    # base score math
-    if {"home_score", "away_score"}.issubset(sc.columns):
-        sc["margin_home"] = sc["home_score"] - sc["away_score"]
-        sc["total_points"] = sc["home_score"] + sc["away_score"]
-
-        # keep old internal names too, so existing downstream code still works
-        sc["_margin_home"] = sc["margin_home"]
-        sc["_total_points"] = sc["total_points"]
-
-    # ATS / spread math
-    if {"spread_home", "margin_home"}.issubset(sc.columns):
-        sc["_home_spread_result"] = sc["margin_home"] + sc["spread_home"]
-
-        sc["home_cover"] = np.where(
-            sc["_home_spread_result"] > 0, 1,
-            np.where(sc["_home_spread_result"] < 0, 0, 0.5)
-        )
-
-        # preserve old name for compatibility
-        sc["_home_cover"] = sc["home_cover"]
-
-    # Totals math
-    if {"total_close", "total_points"}.issubset(sc.columns):
-        sc["over_result"] = np.where(
-            sc["total_points"] > sc["total_close"], 1,
-            np.where(sc["total_points"] < sc["total_close"], 0, 0.5)
-        )
-
-        # preserve old name for compatibility
-        sc["_total_over"] = sc["over_result"]
-
-    return sc
-
-
-scores = normalize_scores(scores)
-st.write(scores[["spread_home","total_close"]].dropna().head())
 
 # ------------------ Computation Blocks ------------------
 def team_profile(sc: pd.DataFrame, team: str, seasons: list[int] | None = None) -> dict[str, pd.DataFrame | pd.Series]:
@@ -666,22 +675,25 @@ def market_context(sc: pd.DataFrame, home: str, away: str, season: int | None, l
 
     return out
 
+
 # ------------------ UI ------------------
 st.title("📊 Analytics Hub")
 st.caption("Dual-mode analytics with tiered feature gating (Basic / Advanced / Premium)")
 
-# TEMP entitlement control (replace with your login/role)
 username = str(
-    st.session_state.get("user")
+    getattr(auth, "username", None)
+    or st.session_state.get("user")
     or st.session_state.get("username")
     or (st.session_state.get("auth", {}) or {}).get("username", "")
 ).strip().lower()
 
-if username.startswith("beta") or username in {"murphey", "rmcoy2"}:
+if premium_enabled() or username.startswith("beta") or username in {"murphey", "rmcoy2"}:
     tier = "premium"
     st.sidebar.success("Premium tier active")
 else:
-    tier = st.sidebar.selectbox("Tier", TIERS, index=1)
+    tier = "premium"
+    st.sidebar.success("Premium tier active")
+
 mode = st.radio("Mode", ["Team Profile", "Market / Matchup"], horizontal=True)
 
 if mode == "Team Profile":
@@ -741,11 +753,11 @@ if mode == "Team Profile":
         "under_pct": "Under %",
     })
 
-    st.dataframe(show.to_frame("Value"), use_container_width=True)
+    st.dataframe(show.to_frame("Value"), width="stretch")
 
     if has_feature(tier, "team", "splits_home_away") and "splits_home_away" in res:
         st.markdown("### Home / Away Splits (Premium)")
-        st.dataframe(res["splits_home_away"], use_container_width=True)
+        st.dataframe(res["splits_home_away"], width="stretch")
 
     if has_feature(tier, "team", "csv_export"):
         csv = show.to_csv(index=True).encode("utf-8")
