@@ -1,4 +1,5 @@
-# ---- FORCE real project root on sys.path ----
+from __future__ import annotations
+
 import sys
 import subprocess
 from dataclasses import dataclass
@@ -9,22 +10,34 @@ from typing import Dict, List
 import pandas as pd
 import streamlit as st
 
+
+# ------------------------------------------------------------------
+# Root/path detection (cloud-safe)
+# ------------------------------------------------------------------
 THIS = Path(__file__).resolve()
-ROOT = THIS.parents[2]
+
+
+def find_repo_root() -> Path:
+    for p in [THIS.parent] + list(THIS.parents):
+        if (p / "streamlit_app.py").exists():
+            return p
+    return Path.cwd()
+
+
+ROOT = find_repo_root()
+TOOLS_DIR = ROOT / "tools"
+EXPORTS_DIR = ROOT / "exports"
+REPORTS_DIR = EXPORTS_DIR / "reports"
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if TOOLS_DIR.exists() and str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
 
-TOOLS = ROOT / "tools"
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
 
-APP_DIR = ROOT / "serving_ui" / "app"
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
-# ----------------------------------------------
-
-# ---- TEMPORARY AUTH DISABLED FOR DEBUGGING ----
+# ------------------------------------------------------------------
+# TEMP AUTH / ELIGIBILITY SHIMS
+# ------------------------------------------------------------------
 def require_eligibility(*args, **kwargs):
     return True
 
@@ -34,34 +47,26 @@ def current_user():
 
 
 def login():
-    pass
+    return None
 
 
 def logout():
-    pass
+    return None
 
 
 def show_logout():
-    pass
-# -----------------------------------------------
+    return None
+
 
 # ------------------------------------------------------------------
-# Paths
+# Ensure only writable repo-local dirs are created
 # ------------------------------------------------------------------
-# This file lives at: edge-finder/serving_ui/app/pages/22_Reports_Hub.py
-PAGES_DIR = Path(__file__).resolve().parent          # .../serving_ui/app/pages
-APP_DIR = PAGES_DIR.parent                           # .../serving_ui/app
-ROOT = APP_DIR.parent.parent                         # .../edge-finder
+for p in (EXPORTS_DIR, REPORTS_DIR):
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        st.warning(f"Could not create directory {p}: {e}")
 
-TOOLS_DIR = ROOT / "tools"
-EXPORTS_DIR = ROOT / "exports"
-REPORTS_DIR = EXPORTS_DIR / "reports"
-
-for p in (TOOLS_DIR, EXPORTS_DIR, REPORTS_DIR):
-    p.mkdir(parents=True, exist_ok=True)
-
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 # ------------------------------------------------------------------
 # Streamlit page config
@@ -72,11 +77,12 @@ st.set_page_config(
     layout="wide",
 )
 
+
 # ------------------------------------------------------------------
 # Config
 # ------------------------------------------------------------------
 DEFAULT_SEASON = 2025
-DEFAULT_WEEK = 13  # change this default anytime
+DEFAULT_WEEK = 13
 
 EDITION_ORDER = [
     "tnf",
@@ -128,60 +134,38 @@ class EditionRow:
 # Helpers
 # ------------------------------------------------------------------
 def guess_current_edition(now: datetime | None = None) -> str:
-    """
-    Heuristic mapping of current local time -> best 3v1 edition key.
-
-    - Thu: TNF
-    - Fri: treat as Sunday Afternoon-style (Black Friday / Xmas style slates)
-    - Sat: Sunday Morning preview
-    - Sun: Morning / Afternoon / SNF from time of day
-    - Mon: Monday edition
-    - Tue: Tuesday wrap
-    - Wed: default to Sunday Morning preview
-    """
     if now is None:
         now = datetime.now()
 
-    dow = now.weekday()  # Mon=0, Tue=1, ..., Sun=6
+    dow = now.weekday()
     hour = now.hour
 
-    if dow == 3:  # Thursday
+    if dow == 3:
         return "tnf"
-
-    if dow == 4:  # Friday
+    if dow == 4:
         return "sunday_afternoon"
-
-    if dow == 5:  # Saturday
+    if dow == 5:
         return "sunday_morning"
-
-    if dow == 6:  # Sunday
+    if dow == 6:
         if hour < 12:
             return "sunday_morning"
         elif hour < 17:
             return "sunday_afternoon"
         else:
             return "snf"
-
-    if dow == 0:  # Monday
+    if dow == 0:
         return "monday"
-
-    if dow == 1:  # Tuesday
+    if dow == 1:
         return "tuesday"
 
-    return "sunday_morning"  # Wednesday default
+    return "sunday_morning"
 
 
 def run_tool_command(args: List[str], description: str, cwd: Path | None = None) -> int:
-    """
-    Run a Python tool using the current interpreter (inside venv) and show
-    logs inline in Streamlit.
-
-    Returns the process return code.
-    """
     if cwd is None:
         cwd = TOOLS_DIR
 
-    st.info(f"Running: `{ ' '.join(args) }`  \n(cwd={cwd})")
+    st.info(f"Running: `{' '.join(args)}`  \n(cwd={cwd})")
 
     try:
         completed = subprocess.run(
@@ -226,7 +210,7 @@ def build_status_table(week: int) -> pd.DataFrame:
             )
         )
 
-    df = pd.DataFrame(
+    return pd.DataFrame(
         [
             {
                 "Edition Key": r.key,
@@ -238,7 +222,6 @@ def build_status_table(week: int) -> pd.DataFrame:
             for r in rows
         ]
     )
-    return df
 
 
 # ------------------------------------------------------------------
@@ -246,8 +229,9 @@ def build_status_table(week: int) -> pd.DataFrame:
 # ------------------------------------------------------------------
 def app():
     st.title("Doc Odds Reports Hub (3v1 Schedule)")
+    st.caption(f"Repo root: {ROOT}")
+    st.caption(f"Reports dir: {REPORTS_DIR}")
 
-    # ----- Sidebar controls -----
     st.sidebar.title("Report Controls")
 
     season = st.sidebar.number_input(
@@ -280,7 +264,6 @@ def app():
         "Generate ALL 3v1 editions for this week"
     )
 
-    # ----- Main header -----
     now = datetime.now()
     suggested_key = guess_current_edition(now)
     suggested_meta = EDITION_META[suggested_key]
@@ -290,7 +273,6 @@ def app():
         f"**{suggested_key}** ({suggested_meta['name']})."
     )
 
-    # ----- Run report for NOW / special edition -----
     st.markdown("### Run report for NOW / special edition")
 
     col_now, col_picker = st.columns([2, 2])
@@ -323,11 +305,9 @@ def app():
 
     st.markdown("---")
 
-    # ----- Week-by-week status table -----
     st.markdown("### Week-by-Week 3v1 Edition Schedule & File Status")
-
     df_status = build_status_table(int(week))
-    st.dataframe(df_status, hide_index=True, use_container_width=True)
+    st.dataframe(df_status, hide_index=True, width="stretch")
 
     st.markdown("#### Run an individual edition")
 
@@ -365,7 +345,6 @@ def app():
         "and `tools/generate_all_editions.py`."
     )
 
-    # ----- Sidebar button actions -----
     if run_full_pipeline_btn:
         scripts_to_try = [
             ("run_week_update.py", "Run weekly ETL/update (games, odds, ECE)"),
@@ -414,5 +393,4 @@ def app():
             st.error(f"{script} not found. Expected at {script}.")
 
 
-if __name__ == "__main__":
-    app()
+app()
