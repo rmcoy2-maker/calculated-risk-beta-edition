@@ -1,0 +1,53 @@
+{
+  "edition": "snf",
+  "edition_label": "Sunday Night Edition",
+  "season": null,
+  "week": 13,
+  "headline": "Primetime spotlight with the cleanest remaining side-total structure and same-game angles.",
+  "counts": {
+    "games": 0,
+    "edges": 0,
+    "parlays": 0,
+    "markets": 0
+  },
+  "confidence_bands": [
+    {
+      "range": "90-100",
+      "label": "Gold",
+      "description": "Fort Knox Tier (ultra-rare)"
+    },
+    {
+      "range": null,
+      "label": "Dark Green",
+      "description": "Premium Edge"
+    },
+    {
+      "range": null,
+      "label": "Green",
+      "description": "Playable Edge"
+    },
+    {
+      "range": null,
+      "label": "Yellow",
+      "description": "Light Lean"
+    },
+    {
+      "range": null,
+      "label": "Amber",
+      "description": "Very Light"
+    },
+    {
+      "range": null,
+      "label": "Red",
+      "description": "Chaos / No Play"
+    }
+  ],
+  "top_edges": [],
+  "heatmap": [],
+  "portfolio": [],
+  "appendix_performance": [
+    "Performance appendix is waiting on stable week-level grading inputs."
+  ],
+  "appendix_scoring": [],
+  "sections": []
+}
