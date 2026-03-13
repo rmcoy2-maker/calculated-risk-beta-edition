@@ -11,7 +11,6 @@ def hash_pw(password: str):
 st.write("Login build: beta-password-set-2")
 # USER DATABASE
 # -----------------------------
-st.sidebar.success(f"Logged in as {st.session_state.user}")
 USERS = {
     "murphey": hash_pw("ECvx554u"),
     "rmcoy001": hash_pw("Dwl0F8Wf"),
@@ -35,6 +34,7 @@ if "user" not in st.session_state:
 
 if not st.session_state.authenticated:
     st.title("🔐 Calculated Risk Beta Access")
+    st.caption("🧪 Private Beta — Authorized Testers Only")
 
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
