@@ -52,33 +52,42 @@ except Exception:
 
 import importlib.util
 
+from pathlib import Path
+import importlib.util
+
+def _find_repo_root(start: Path) -> Path:
+    for p in [start] + list(start.parents):
+        if (p / "streamlit_app.py").exists():
+            return p
+    return start.parent
+
 def _load_clv_helper():
-    try:
-        from app.utils.clv import apply_clv_columns, american_to_decimal
-        return apply_clv_columns, american_to_decimal
-    except Exception:
-        pass
+    here = Path(__file__).resolve()
+    repo_root = _find_repo_root(here)
 
-    try:
-        from utils.clv import apply_clv_columns, american_to_decimal
-        return apply_clv_columns, american_to_decimal
-    except Exception:
-        pass
+    candidates = [
+        repo_root / "tools" / "clv_helper.py",
+        repo_root / "utils" / "clv_helper.py",
+        repo_root / "app" / "utils" / "clv_helper.py",
+        repo_root / "pages" / "clv_helper.py",
+    ]
 
-    app_dir = HERE.parents[1]   # .../app
-    clv_path = app_dir / "utils" / "clv.py"
-    if not clv_path.exists():
-        raise ModuleNotFoundError(f"CLV helper not found at {clv_path}")
+    for clv_path in candidates:
+        if clv_path.exists():
+            spec = importlib.util.spec_from_file_location("clv_helper", clv_path)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            spec.loader.exec_module(mod)
 
-    spec = importlib.util.spec_from_file_location("edgefinder_clv", clv_path)
-    if spec is None or spec.loader is None:
-        raise ModuleNotFoundError(f"Could not load CLV helper from {clv_path}")
+            apply_clv_columns = getattr(mod, "apply_clv_columns", None)
+            american_to_decimal = getattr(mod, "american_to_decimal", None)
 
-    clv_mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = clv_mod
-    spec.loader.exec_module(clv_mod)
+            if apply_clv_columns and american_to_decimal:
+                return apply_clv_columns, american_to_decimal
 
-    return clv_mod.apply_clv_columns, clv_mod.american_to_decimal
+    raise ModuleNotFoundError(
+        "CLV helper not found. Looked in:\n" + "\n".join(str(p) for p in candidates)
+    )
 
 
 apply_clv_columns, american_to_decimal = _load_clv_helper()
