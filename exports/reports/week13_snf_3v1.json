@@ -1,53 +1,26 @@
 {
-  "edition": "snf",
-  "edition_label": "Sunday Night Edition",
-  "season": null,
-  "week": 13,
-  "headline": "Primetime spotlight with the cleanest remaining side-total structure and same-game angles.",
-  "counts": {
-    "games": 0,
-    "edges": 0,
-    "parlays": 0,
-    "markets": 0
+  "meta": {
+    "title": "FORT KNOX — WEEK 13 SUNDAY NIGHT EDITION",
+    "season": 2025,
+    "week": 13,
+    "edition": "snf",
+    "asof": null,
+    "generated_at": "2026-03-13T18:31:04"
   },
-  "confidence_bands": [
-    {
-      "range": "90-100",
-      "label": "Gold",
-      "description": "Fort Knox Tier (ultra-rare)"
-    },
-    {
-      "range": null,
-      "label": "Dark Green",
-      "description": "Premium Edge"
-    },
-    {
-      "range": null,
-      "label": "Green",
-      "description": "Playable Edge"
-    },
-    {
-      "range": null,
-      "label": "Yellow",
-      "description": "Light Lean"
-    },
-    {
-      "range": null,
-      "label": "Amber",
-      "description": "Very Light"
-    },
-    {
-      "range": null,
-      "label": "Red",
-      "description": "Chaos / No Play"
-    }
-  ],
   "top_edges": [],
   "heatmap": [],
-  "portfolio": [],
-  "appendix_performance": [
-    "Performance appendix is waiting on stable week-level grading inputs."
-  ],
-  "appendix_scoring": [],
-  "sections": []
+  "games": [],
+  "parlays": [],
+  "appendix": {
+    "summary": {
+      "edge_count": 0,
+      "game_count": 0,
+      "parlay_count": 0
+    },
+    "notes": [
+      "Top board is ranked by Fort Knox score, blending edge, confidence, disagreement, synergy, weather, and stability.",
+      "Narratives are template-driven from the canonical week files.",
+      "This report is for educational and entertainment purposes only."
+    ]
+  }
 }
