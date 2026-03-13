@@ -147,7 +147,7 @@ with tab_rookie:
     )
 
 with tab_pro:
-    st.markdown("### Pro — $55/month")
+    st.markdown("### Pro — $30/month")
     st.markdown(
         """
 | **Feature** | **Details** |
@@ -166,7 +166,7 @@ with tab_pro:
     )
 
 with tab_hof:
-    st.markdown("### HOF (Elite) — $80/month")
+    st.markdown("### HOF (Elite) — $40/month")
     st.markdown(
         """
 | **Feature** | **Details** |
