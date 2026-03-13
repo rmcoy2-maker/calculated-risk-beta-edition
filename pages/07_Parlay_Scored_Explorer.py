@@ -127,8 +127,7 @@ def _repo_root() -> Path:
 
 
 def _exports_dir() -> Path:
-    repo = _repo_root()
-    return repo / "exports"
+    return _repo_root() / "exports"
 
 
 def load_edges_or_scores() -> tuple[pd.DataFrame, str]:
@@ -189,12 +188,6 @@ work = df.copy()
 
 if "All" not in season_sel and seasons_all and "season" in work.columns:
     keep = {int(x) for x in season_sel if str(x).isdigit()}
-    work = work[work["season"].astype("Int64").isin(keep)]
-
-if "All" not in week_sel and "week" in work.columns:
-    keep = {int(x) for x in week_sel if str(x).isdigit()}
-    if "All" not in season_sel and seasons_all and "season" in work.columns:
-    keep = {int(x) for x in season_sel if str(x).isdigit()}
     season_num = pd.to_numeric(work["season"], errors="coerce")
     work = work[season_num.isin(keep)]
 
@@ -205,7 +198,7 @@ if "All" not in week_sel and "week" in work.columns:
 
 if has_score:
     thr = st.slider("Min parlay probability", 0.0, 1.0, 0.7, 0.01)
-    work = work[work["parlay_proba"].fillna(0) >= thr]
+    work = work[pd.to_numeric(work["parlay_proba"], errors="coerce").fillna(0) >= thr]
     st.caption(f"{len(work):,} rows ≥ {thr:.2f}")
 
 pref_cols = [
