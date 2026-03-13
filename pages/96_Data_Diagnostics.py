@@ -142,7 +142,88 @@ show_nudge(feature="analytics", metric="page_visit", threshold=10, period="1D", 
 # === /Nudge (auto-injected) ===
 
 import pandas as pd
-from lib.io_paths import load_edges, load_scores
+from pathlib import Path
+import pandas as pd
+
+try:
+    from lib.io_paths import load_edges, load_scores
+except Exception:
+    def _repo_root() -> Path:
+        here = Path(__file__).resolve()
+        for p in [here.parent] + list(here.parents):
+            if (p / "streamlit_app.py").exists():
+                return p
+        return Path.cwd()
+
+    def _pick_latest_file(root: Path, names: list[str], patterns: list[str]) -> Path | None:
+        matches: list[Path] = []
+
+        for name in names:
+            p = root / name
+            if p.exists() and p.is_file():
+                matches.append(p)
+
+        for pattern in patterns:
+            matches.extend([p for p in root.glob(pattern) if p.is_file()])
+
+        if not matches:
+            return None
+
+        uniq = {str(p.resolve()): p for p in matches}
+        return max(uniq.values(), key=lambda p: p.stat().st_mtime)
+
+    def load_edges() -> pd.DataFrame:
+        exports = _repo_root() / "exports"
+        path = _pick_latest_file(
+            exports,
+            names=[
+                "edges_standardized.csv",
+                "edges_graded_full_normalized_std.csv",
+                "edges_graded_full.csv",
+                "edges_normalized.csv",
+                "edges.csv",
+            ],
+            patterns=[
+                "*edges*standardized*.csv",
+                "*edges*normalized*.csv",
+                "*edges*graded*.csv",
+                "*edges*.csv",
+            ],
+        )
+        if path is None:
+            return pd.DataFrame()
+        try:
+            return pd.read_csv(path, low_memory=False, encoding="utf-8-sig")
+        except Exception:
+            return pd.DataFrame()
+
+    def load_scores() -> pd.DataFrame:
+        exports = _repo_root() / "exports"
+        path = _pick_latest_file(
+            exports,
+            names=[
+                "games_master_template.csv",
+                "scores_1966-2025.csv",
+                "scores_1966-2025_merged.csv",
+                "scores_1966-2025_merged_unmatched.csv",
+                "_backup_scores_1966-2025.csv",
+                "scores_normalized_std.csv",
+                "scores_normalized.csv",
+                "scores.csv",
+            ],
+            patterns=[
+                "*games_master_template*.csv",
+                "*scores_1966-2025*.csv",
+                "*scores*normalized*.csv",
+                "*scores*.csv",
+            ],
+        )
+        if path is None:
+            return pd.DataFrame()
+        try:
+            return pd.read_csv(path, low_memory=False, encoding="utf-8-sig")
+        except Exception:
+            return pd.DataFrame()
 from lib.join_scores import attach_scores
 try:
     from app.utils.diagnostics import mount_in_sidebar
