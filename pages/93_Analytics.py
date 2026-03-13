@@ -61,6 +61,71 @@ def _find_repo_root(start: Path) -> Path:
             return p
     return start.parent
 
+from pathlib import Path
+import importlib.util
+import pandas as pd
+
+def _find_repo_root(start: Path) -> Path:
+    for p in [start] + list(start.parents):
+        if (p / "streamlit_app.py").exists():
+            return p
+    return start.parent
+
+def _fallback_american_to_decimal(odds):
+    if odds is None or pd.isna(odds):
+        return None
+    try:
+        o = float(odds)
+    except Exception:
+        return None
+    if o > 0:
+        return 1.0 + o / 100.0
+    if o < 0:
+        return 1.0 + 100.0 / abs(o)
+    return None
+
+def _fallback_apply_clv_columns(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+
+    if (
+        "closing_line" in out.columns
+        and "line_at_pick" in out.columns
+        and "market" in out.columns
+        and "side" in out.columns
+    ):
+        def beat_closing_bool(row):
+            try:
+                mkt = str(row.get("market", "")).lower()
+                side = str(row.get("side", "")).lower()
+                pick = float(row.get("line_at_pick"))
+                close = float(row.get("closing_line"))
+            except Exception:
+                return None
+
+            if any(pd.isna(x) for x in [pick, close]):
+                return None
+
+            if "spread" in mkt:
+                if side == "home" or side == str(row.get("home", "")).lower():
+                    return 1.0 if pick > close else 0.0
+                if side == "away" or side == str(row.get("away", "")).lower():
+                    return 1.0 if pick < close else 0.0
+                return None
+
+            if "total" in mkt or mkt.startswith("o/"):
+                if side in ("over", "o"):
+                    return 1.0 if close > pick else 0.0
+                if side in ("under", "u"):
+                    return 1.0 if close < pick else 0.0
+                return None
+
+            return None
+
+        if "beat_closing" not in out.columns or out["beat_closing"].isna().all():
+            out["beat_closing"] = out.apply(beat_closing_bool, axis=1)
+
+    return out
+
 def _load_clv_helper():
     here = Path(__file__).resolve()
     repo_root = _find_repo_root(here)
@@ -85,8 +150,8 @@ def _load_clv_helper():
             if apply_clv_columns and american_to_decimal:
                 return apply_clv_columns, american_to_decimal
 
-    raise ModuleNotFoundError(
-        "CLV helper not found. Looked in:\n" + "\n".join(str(p) for p in candidates)
+    # Cloud-safe fallback: do not crash if helper file is missing
+    return _fallback_apply_clv_columns, _fallback_american_to_decimal
     )
 
 

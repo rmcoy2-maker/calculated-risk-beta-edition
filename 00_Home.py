@@ -49,7 +49,11 @@ if not st.session_state.authenticated:
 
     st.stop()
 
-st.sidebar.success(f"Logged in as {st.session_state.user}")
+user = st.session_state.get("user")
+if user:
+    st.sidebar.success(f"Logged in as {user}")
+else:
+    st.sidebar.info("Not signed in")
 
 if st.sidebar.button("Logout"):
     st.session_state.authenticated = False
