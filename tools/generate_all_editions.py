@@ -1,38 +1,23 @@
-import subprocess
-import sys
+from __future__ import annotations
+
 import argparse
+from pathlib import Path
 
-EDITIONS = [
-    "tnf",
-    "sunday_morning",
-    "sunday_afternoon",
-    "snf",
-    "monday",
-    "tuesday",
-]
+from report_data import EDITION_ORDER
+from generate_report import generate_report
 
 
-def main():
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--week", required=True, type=int)
-
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate every Fort Knox / 3v1 edition for a week.")
+    parser.add_argument("--season", type=int, default=None)
+    parser.add_argument("--week", type=int, required=True)
+    parser.add_argument("--out_dir", default=None)
     args = parser.parse_args()
 
-    for edition in EDITIONS:
-
-        cmd = [
-            sys.executable,
-            "generate_report.py",
-            "--week",
-            str(args.week),
-            "--edition",
-            edition,
-        ]
-
-        print("Running:", " ".join(cmd))
-
-        subprocess.run(cmd)
+    out_dir = Path(args.out_dir) if args.out_dir else None
+    for edition in EDITION_ORDER:
+        artifacts = generate_report(args.season, args.week, edition, out_dir)
+        print(f"[OK] {edition}: {artifacts.pdf_path.name}")
 
 
 if __name__ == "__main__":

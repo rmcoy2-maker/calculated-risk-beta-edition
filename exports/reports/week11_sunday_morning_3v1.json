@@ -1,0 +1,262 @@
+{
+  "edition": "sunday_morning",
+  "edition_label": "Sunday Morning Edition",
+  "season": 2025,
+  "week": 11,
+  "headline": "Full-slate preview with flagship sides, totals, parlay anchors, and market-shape narrative.",
+  "counts": {
+    "games": 0,
+    "edges": 28,
+    "parlays": 28,
+    "markets": 0
+  },
+  "confidence_bands": [
+    {
+      "range": "90-100",
+      "label": "Gold",
+      "description": "Fort Knox Tier (ultra-rare)"
+    },
+    {
+      "range": null,
+      "label": "Dark Green",
+      "description": "Premium Edge"
+    },
+    {
+      "range": null,
+      "label": "Green",
+      "description": "Playable Edge"
+    },
+    {
+      "range": null,
+      "label": "Yellow",
+      "description": "Light Lean"
+    },
+    {
+      "range": null,
+      "label": "Amber",
+      "description": "Very Light"
+    },
+    {
+      "range": null,
+      "label": "Red",
+      "description": "Chaos / No Play"
+    }
+  ],
+  "top_edges": [
+    {
+      "matchup": "",
+      "matchup_short": "",
+      "market": "<NA>",
+      "side": "<NA>",
+      "line": null,
+      "odds": null,
+      "p_win": null,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow",
+      "why": "Market and model align well enough to keep this on the board."
+    },
+    {
+      "matchup": "",
+      "matchup_short": "",
+      "market": "<NA>",
+      "side": "<NA>",
+      "line": null,
+      "odds": null,
+      "p_win": null,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow",
+      "why": "Market and model align well enough to keep this on the board."
+    },
+    {
+      "matchup": "",
+      "matchup_short": "",
+      "market": "<NA>",
+      "side": "<NA>",
+      "line": null,
+      "odds": null,
+      "p_win": null,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow",
+      "why": "Market and model align well enough to keep this on the board."
+    },
+    {
+      "matchup": "",
+      "matchup_short": "",
+      "market": "<NA>",
+      "side": "<NA>",
+      "line": null,
+      "odds": null,
+      "p_win": null,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow",
+      "why": "Market and model align well enough to keep this on the board."
+    },
+    {
+      "matchup": "",
+      "matchup_short": "",
+      "market": "<NA>",
+      "side": "<NA>",
+      "line": null,
+      "odds": null,
+      "p_win": null,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow",
+      "why": "Market and model align well enough to keep this on the board."
+    },
+    {
+      "matchup": "",
+      "matchup_short": "",
+      "market": "<NA>",
+      "side": "<NA>",
+      "line": null,
+      "odds": null,
+      "p_win": null,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow",
+      "why": "Market and model align well enough to keep this on the board."
+    },
+    {
+      "matchup": "",
+      "matchup_short": "",
+      "market": "<NA>",
+      "side": "<NA>",
+      "line": null,
+      "odds": null,
+      "p_win": null,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow",
+      "why": "Market and model align well enough to keep this on the board."
+    },
+    {
+      "matchup": "",
+      "matchup_short": "",
+      "market": "<NA>",
+      "side": "<NA>",
+      "line": null,
+      "odds": null,
+      "p_win": null,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow",
+      "why": "Market and model align well enough to keep this on the board."
+    },
+    {
+      "matchup": "",
+      "matchup_short": "",
+      "market": "<NA>",
+      "side": "<NA>",
+      "line": null,
+      "odds": null,
+      "p_win": null,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow",
+      "why": "Market and model align well enough to keep this on the board."
+    },
+    {
+      "matchup": "",
+      "matchup_short": "",
+      "market": "<NA>",
+      "side": "<NA>",
+      "line": null,
+      "odds": null,
+      "p_win": null,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow",
+      "why": "Market and model align well enough to keep this on the board."
+    }
+  ],
+  "heatmap": [
+    {
+      "game": "",
+      "angle": "<Na>: <NA>",
+      "confidence": 56,
+      "band": "Yellow"
+    },
+    {
+      "game": "",
+      "angle": "<Na>: <NA>",
+      "confidence": 56,
+      "band": "Yellow"
+    },
+    {
+      "game": "",
+      "angle": "<Na>: <NA>",
+      "confidence": 56,
+      "band": "Yellow"
+    },
+    {
+      "game": "",
+      "angle": "<Na>: <NA>",
+      "confidence": 56,
+      "band": "Yellow"
+    },
+    {
+      "game": "",
+      "angle": "<Na>: <NA>",
+      "confidence": 56,
+      "band": "Yellow"
+    },
+    {
+      "game": "",
+      "angle": "<Na>: <NA>",
+      "confidence": 56,
+      "band": "Yellow"
+    },
+    {
+      "game": "",
+      "angle": "<Na>: <NA>",
+      "confidence": 56,
+      "band": "Yellow"
+    },
+    {
+      "game": "",
+      "angle": "<Na>: <NA>",
+      "confidence": 56,
+      "band": "Yellow"
+    }
+  ],
+  "portfolio": [
+    {
+      "name": "Parlay #1",
+      "label": "<NA> / Market",
+      "legs": null,
+      "prob": 0.5,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow"
+    },
+    {
+      "name": "Parlay #2",
+      "label": "<NA> / Market",
+      "legs": null,
+      "prob": 0.5,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow"
+    },
+    {
+      "name": "Parlay #3",
+      "label": "<NA> / Market",
+      "legs": null,
+      "prob": 0.5,
+      "ev": null,
+      "confidence": 56,
+      "band": "Yellow"
+    }
+  ],
+  "appendix_performance": [
+    "Top 5 edges carry average win probability - with average EV -.",
+    "Parlay portfolio average hit profile is 50.0% with EV - across the strongest carryovers."
+  ],
+  "appendix_scoring": [],
+  "sections": []
+}

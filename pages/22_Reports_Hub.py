@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sys
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -11,9 +11,6 @@ import pandas as pd
 import streamlit as st
 
 
-# ------------------------------------------------------------------
-# Root/path detection (cloud-safe)
-# ------------------------------------------------------------------
 THIS = Path(__file__).resolve()
 
 
@@ -34,10 +31,13 @@ if str(ROOT) not in sys.path:
 if TOOLS_DIR.exists() and str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+for p in (EXPORTS_DIR, REPORTS_DIR):
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        st.warning(f"Could not create directory {p}: {e}")
 
-# ------------------------------------------------------------------
-# TEMP AUTH / ELIGIBILITY SHIMS
-# ------------------------------------------------------------------
+
 def require_eligibility(*args, **kwargs):
     return True
 
@@ -58,29 +58,12 @@ def show_logout():
     return None
 
 
-# ------------------------------------------------------------------
-# Ensure only writable repo-local dirs are created
-# ------------------------------------------------------------------
-for p in (EXPORTS_DIR, REPORTS_DIR):
-    try:
-        p.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        st.warning(f"Could not create directory {p}: {e}")
-
-
-# ------------------------------------------------------------------
-# Streamlit page config
-# ------------------------------------------------------------------
 st.set_page_config(
     page_title="Doc Odds Reports Hub (3v1 Schedule)",
     page_icon="📑",
     layout="wide",
 )
 
-
-# ------------------------------------------------------------------
-# Config
-# ------------------------------------------------------------------
 DEFAULT_SEASON = 2025
 DEFAULT_WEEK = 13
 
@@ -130,9 +113,6 @@ class EditionRow:
     exists: bool
 
 
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
 def guess_current_edition(now: datetime | None = None) -> str:
     if now is None:
         now = datetime.now()
@@ -149,10 +129,9 @@ def guess_current_edition(now: datetime | None = None) -> str:
     if dow == 6:
         if hour < 12:
             return "sunday_morning"
-        elif hour < 17:
+        if hour < 17:
             return "sunday_afternoon"
-        else:
-            return "snf"
+        return "snf"
     if dow == 0:
         return "monday"
     if dow == 1:
@@ -196,17 +175,16 @@ def build_status_table(week: int) -> pd.DataFrame:
     rows: List[EditionRow] = []
 
     for key in EDITION_ORDER:
-        meta = EDITION_META[key]
-        pdf_name = f"week{week}_{key}_3v1.pdf"
-        pdf_path = REPORTS_DIR / pdf_name
+        pattern = f"week{week}_{key}_3v1"
+        exists = any(p.name.startswith(pattern) and p.suffix.lower() == ".pdf" for p in REPORTS_DIR.glob("*.pdf"))
 
         rows.append(
             EditionRow(
                 key=key,
-                name=meta["name"],
-                timing=meta["timing"],
-                pdf_file=pdf_name,
-                exists=pdf_path.exists(),
+                name=EDITION_META[key]["name"],
+                timing=EDITION_META[key]["timing"],
+                pdf_file=f"{pattern}_YYYYMMDD_HHMM.pdf",
+                exists=exists,
             )
         )
 
@@ -216,7 +194,7 @@ def build_status_table(week: int) -> pd.DataFrame:
                 "Edition Key": r.key,
                 "Edition Name": r.name,
                 "Timing Window": r.timing,
-                "PDF File": r.pdf_file,
+                "Expected File Pattern": r.pdf_file,
                 "Status": "✅ Generated" if r.exists else "❌ Missing",
             }
             for r in rows
@@ -224,10 +202,13 @@ def build_status_table(week: int) -> pd.DataFrame:
     )
 
 
-# ------------------------------------------------------------------
-# UI
-# ------------------------------------------------------------------
-def app():
+def list_report_files(week: int) -> list[Path]:
+    prefix = f"week{week}_"
+    files = [p for p in REPORTS_DIR.glob("*.pdf") if p.name.startswith(prefix)]
+    return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def app() -> None:
     st.title("Doc Odds Reports Hub (3v1 Schedule)")
     st.caption(f"Repo root: {ROOT}")
     st.caption(f"Reports dir: {REPORTS_DIR}")
@@ -275,7 +256,7 @@ def app():
 
     st.markdown("### Run report for NOW / special edition")
 
-    col_now, col_picker = st.columns([2, 2])
+    col_auto, col_picker = st.columns([2, 2])
 
     with col_picker:
         edition_for_now = st.selectbox(
@@ -285,23 +266,49 @@ def app():
             index=EDITION_ORDER.index(suggested_key),
         )
 
-    with col_now:
-        if st.button("Run report for NOW -> generate this edition"):
+    with col_auto:
+        if st.button("Generate report as of NOW"):
             script = TOOLS_DIR / "generate_report.py"
+            asof_now = datetime.now().isoformat(timespec="minutes")
+            auto_edition = guess_current_edition(datetime.now())
+
             if script.exists():
                 run_tool_command(
                     [
                         sys.executable,
-                        "generate_report.py",
+                        str(script),
                         "--week",
                         str(week),
                         "--edition",
-                        edition_for_now,
+                        auto_edition,
+                        "--asof",
+                        asof_now,
                     ],
-                    description=f"Generate single 3v1 edition ({edition_for_now})",
+                    description=f"Generate report for NOW ({auto_edition})",
                 )
             else:
                 st.error(f"{script} not found. Expected at {script}.")
+
+    if st.button("Generate selected edition"):
+        script = TOOLS_DIR / "generate_report.py"
+        asof_now = datetime.now().isoformat(timespec="minutes")
+
+        if script.exists():
+            run_tool_command(
+                [
+                    sys.executable,
+                    str(script),
+                    "--week",
+                    str(week),
+                    "--edition",
+                    edition_for_now,
+                    "--asof",
+                    asof_now,
+                ],
+                description=f"Generate selected 3v1 edition ({edition_for_now})",
+            )
+        else:
+            st.error(f"{script} not found. Expected at {script}.")
 
     st.markdown("---")
 
@@ -309,34 +316,24 @@ def app():
     df_status = build_status_table(int(week))
     st.dataframe(df_status, hide_index=True, width="stretch")
 
-    st.markdown("#### Run an individual edition")
+    st.markdown("### Existing generated reports")
+    files = list_report_files(int(week))
 
-    col_ed, col_btn = st.columns([3, 1])
-
-    with col_ed:
-        edition_choice = st.selectbox(
-            "Choose edition to generate",
-            options=EDITION_ORDER,
-            format_func=lambda k: f"{k} — {EDITION_META[k]['name']}",
-        )
-
-    with col_btn:
-        if st.button("Generate selected edition"):
-            script = TOOLS_DIR / "generate_report.py"
-            if script.exists():
-                run_tool_command(
-                    [
-                        sys.executable,
-                        "generate_report.py",
-                        "--week",
-                        str(week),
-                        "--edition",
-                        edition_choice,
-                    ],
-                    description=f"Generate 3v1 edition ({edition_choice})",
+    if not files:
+        st.caption("No generated reports found yet for this week.")
+    else:
+        for pdf in files:
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.write(pdf.name)
+            with col2:
+                st.download_button(
+                    label="Download",
+                    data=pdf.read_bytes(),
+                    file_name=pdf.name,
+                    mime="application/pdf",
+                    key=f"dl_{pdf.name}",
                 )
-            else:
-                st.error(f"{script} not found. Expected at {script}.")
 
     st.markdown("---")
     st.caption(
@@ -346,46 +343,39 @@ def app():
     )
 
     if run_full_pipeline_btn:
-        scripts_to_try = [
-            ("run_week_update.py", "Run weekly ETL/update (games, odds, ECE)"),
-            ("run_playoffs_update.py", "Run playoffs update (if applicable)"),
-            ("generate_all_editions.py", "Generate ALL 3v1 editions"),
-        ]
+        st.info("Weekly ETL / playoffs scripts are not wired yet. Running report generation only.")
 
-        for script_name, label in scripts_to_try:
-            script_path = TOOLS_DIR / script_name
-            if not script_path.exists():
-                st.info(f"Skipping {script_name} (not found in tools).")
-                continue
-
-            if script_name.startswith("generate_all_editions"):
-                args = [
-                    sys.executable,
-                    script_name,
-                    "--week",
-                    str(week),
-                ]
-            else:
-                args = [
-                    sys.executable,
-                    script_name,
-                    "--season",
-                    str(season),
-                    "--week",
-                    str(week),
-                ]
-
-            run_tool_command(args, description=label)
-
-    if run_all_editions_btn:
         script = TOOLS_DIR / "generate_all_editions.py"
+        asof_now = datetime.now().isoformat(timespec="minutes")
+
         if script.exists():
             run_tool_command(
                 [
                     sys.executable,
-                    "generate_all_editions.py",
+                    str(script),
                     "--week",
                     str(week),
+                    "--asof",
+                    asof_now,
+                ],
+                description="Generate ALL 3v1 editions",
+            )
+        else:
+            st.error(f"{script} not found. Expected at {script}.")
+
+    if run_all_editions_btn:
+        script = TOOLS_DIR / "generate_all_editions.py"
+        asof_now = datetime.now().isoformat(timespec="minutes")
+
+        if script.exists():
+            run_tool_command(
+                [
+                    sys.executable,
+                    str(script),
+                    "--week",
+                    str(week),
+                    "--asof",
+                    asof_now,
                 ],
                 description="Generate ALL 3v1 editions",
             )
