@@ -670,7 +670,18 @@ def market_context(sc: pd.DataFrame, home: str, away: str, season: int | None, l
 st.title("📊 Analytics Hub")
 st.caption("Dual-mode analytics with tiered feature gating (Basic / Advanced / Premium)")
 
-tier = st.sidebar.selectbox("Tier (temporary control)", TIERS, index=1)
+# TEMP entitlement control (replace with your login/role)
+username = str(
+    st.session_state.get("user")
+    or st.session_state.get("username")
+    or (st.session_state.get("auth", {}) or {}).get("username", "")
+).strip().lower()
+
+if username.startswith("beta") or username in {"murphey", "rmcoy2"}:
+    tier = "premium"
+    st.sidebar.success("Premium tier active")
+else:
+    tier = st.sidebar.selectbox("Tier", TIERS, index=1)
 mode = st.radio("Mode", ["Team Profile", "Market / Matchup"], horizontal=True)
 
 if mode == "Team Profile":
