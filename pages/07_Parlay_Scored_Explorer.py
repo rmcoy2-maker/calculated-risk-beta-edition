@@ -154,8 +154,8 @@ def load_edges_or_scores() -> tuple[pd.DataFrame, str]:
 def _num_unique(df: pd.DataFrame, col: str) -> list[int]:
     if col not in df.columns:
         return []
-    s = pd.to_numeric(df[col], errors="coerce").dropna().astype(int)
-    return sorted(s.unique().tolist())
+    s = pd.to_numeric(df[col], errors="coerce").dropna()
+    return sorted(s.astype(int).unique().tolist())
 
 
 df, src_path = load_edges_or_scores()
@@ -193,7 +193,15 @@ if "All" not in season_sel and seasons_all and "season" in work.columns:
 
 if "All" not in week_sel and "week" in work.columns:
     keep = {int(x) for x in week_sel if str(x).isdigit()}
-    work = work[work["week"].astype("Int64").isin(keep)]
+    if "All" not in season_sel and seasons_all and "season" in work.columns:
+    keep = {int(x) for x in season_sel if str(x).isdigit()}
+    season_num = pd.to_numeric(work["season"], errors="coerce")
+    work = work[season_num.isin(keep)]
+
+if "All" not in week_sel and "week" in work.columns:
+    keep = {int(x) for x in week_sel if str(x).isdigit()}
+    week_num = pd.to_numeric(work["week"], errors="coerce")
+    work = work[week_num.isin(keep)]
 
 if has_score:
     thr = st.slider("Min parlay probability", 0.0, 1.0, 0.7, 0.01)
