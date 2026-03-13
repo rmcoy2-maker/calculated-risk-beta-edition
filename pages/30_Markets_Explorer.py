@@ -1,5 +1,3 @@
-# serving_ui/app/pages/30_Markets_Explorer.py
-
 from __future__ import annotations
 
 import sys
@@ -51,14 +49,12 @@ def load_markets(week: int) -> pd.DataFrame:
 
     return pd.read_csv(path)
 
-
-# -------------------------------------------------
-# Streamlit page
-# -------------------------------------------------
 def app():
     st.title("📊 Markets Explorer")
 
-    week = st.number_input("NFL Week", 1, 22, 12)
+    st.caption(f"Data dir: {DATA_DIR}")
+
+    week = st.number_input("NFL Week", min_value=1, max_value=22, value=12, step=1)
 
     try:
         df_raw = load_markets(int(week))
@@ -66,12 +62,23 @@ def app():
         st.error(str(e))
         return
 
+    if df_raw.empty:
+        st.warning("Markets file loaded, but it is empty.")
+        return
+
     df = prepare_markets_for_app(df_raw)
 
-    event_ids = sorted(df["event_id"].unique())
+    if "event_id" not in df.columns or df["event_id"].dropna().empty:
+        st.warning("No event_id values were available after preparing markets.")
+        st.dataframe(df.head(100), width="stretch", hide_index=True)
+        return
+
+    event_ids = sorted(df["event_id"].dropna().astype(str).unique().tolist())
     event_id = st.selectbox("Game", event_ids)
 
-    df_game = df[df["event_id"] == event_id]
+    df_game = df[df["event_id"].astype(str) == str(event_id)]
 
     st.subheader("Markets + Player Props")
-    st.dataframe(df_game, use_container_width=True, hide_index=True)
+    st.dataframe(df_game, width="stretch", hide_index=True)
+
+app()
