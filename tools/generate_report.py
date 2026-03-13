@@ -1,62 +1,63 @@
-from __future__ import annotations
-
-import argparse
-import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
-
+import argparse
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLS = ROOT / "tools"
+EXPORTS = ROOT / "exports"
+REPORTS = EXPORTS / "reports"
 
-EDITIONS = [
-    "tnf",
-    "sunday_morning",
-    "sunday_afternoon",
-    "snf",
-    "monday",
-    "tuesday",
-]
+REPORTS.mkdir(parents=True, exist_ok=True)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate all 3v1 report editions for a week")
-    parser.add_argument("--week", required=True, type=int, help="NFL week number")
-    parser.add_argument(
-        "--asof",
-        required=False,
-        default=None,
-        type=str,
-        help="Optional shared as-of timestamp for all editions",
-    )
+def build_report_file(week: int, edition: str, asof: str | None = None):
+
+    now = datetime.now()
+    stamp = now.strftime("%Y%m%d_%H%M")
+
+    filename = f"week{week}_{edition}_3v1_{stamp}.pdf"
+    out = REPORTS / filename
+
+    content = f"""
+CALCULATED RISK — 3v1 REPORT
+
+Edition: {edition}
+Week: {week}
+
+As Of: {asof}
+Generated: {now}
+
+Placeholder generator.
+
+Future sections:
+- Top edges
+- Heatmap board
+- Game scripts
+- Parlay portfolio
+"""
+
+    out.write_text(content)
+
+    return out
+
+
+def main():
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--week", required=True, type=int)
+    parser.add_argument("--edition", required=True)
+    parser.add_argument("--asof", default=None)
 
     args = parser.parse_args()
-    asof = args.asof or datetime.now().isoformat(timespec="minutes")
 
-    for edition in EDITIONS:
-        cmd = [
-            sys.executable,
-            str(TOOLS / "generate_report.py"),
-            "--week",
-            str(args.week),
-            "--edition",
-            edition,
-            "--asof",
-            asof,
-        ]
+    path = build_report_file(
+        week=args.week,
+        edition=args.edition,
+        asof=args.asof,
+    )
 
-        print("Running:", " ".join(cmd))
-        completed = subprocess.run(cmd, capture_output=True, text=True)
-
-        if completed.stdout:
-            print(completed.stdout.strip())
-
-        if completed.stderr:
-            print(completed.stderr.strip())
-
-        if completed.returncode != 0:
-            raise SystemExit(completed.returncode)
+    print("Report created:")
+    print(path)
 
 
 if __name__ == "__main__":
