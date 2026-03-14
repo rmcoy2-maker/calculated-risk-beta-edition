@@ -1,0 +1,6 @@
+raw/
+exports/
+*.csv
+*.parquet
+*.feather
+*.xlsx
