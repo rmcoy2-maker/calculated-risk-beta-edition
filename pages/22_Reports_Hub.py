@@ -286,28 +286,38 @@ def app() -> None:
     st.caption(f"Reports dir: {REPORTS_DIR}")
     st.caption(f"App Python: {sys.executable}")
 
-    st.sidebar.title("Report Controls")
+    archive_df = build_archive_table()
 
-    season = st.sidebar.number_input(
+    season_values = sorted({
+        int(x) for x in archive_df["Season"].dropna().tolist()
+        if str(x) != "nan"
+    }) if not archive_df.empty else []
+
+    if DEFAULT_SEASON not in season_values:
+        season_values.append(DEFAULT_SEASON)
+
+    season_values = sorted(set(season_values))
+
+    if not season_values:
+        season_values = [DEFAULT_SEASON]
+
+    week_values = list(range(1, 19))
+    if not archive_df.empty:
+        week_values = sorted(set(week_values) | {
+            int(x) for x in archive_df["Week"].dropna().tolist()
+            if str(x) != "nan"
+        })
+
+    season = st.sidebar.selectbox(
         "Season",
-        min_value=2010,
-        max_value=2100,
-        value=DEFAULT_SEASON,
-        step=1,
+        options=season_values,
+        index=season_values.index(DEFAULT_SEASON) if DEFAULT_SEASON in season_values else 0,
     )
 
-    week = st.sidebar.number_input(
+    week = st.sidebar.selectbox(
         "Week",
-        min_value=1,
-        max_value=25,
-        value=DEFAULT_WEEK,
-        step=1,
-    )
-
-    st.sidebar.subheader("Batch Actions")
-
-    run_all_editions_btn = st.sidebar.button(
-        "Generate ALL 3v1 editions for this season/week"
+        options=week_values,
+        index=week_values.index(DEFAULT_WEEK) if DEFAULT_WEEK in week_values else 0,
     )
 
     now = datetime.now()
@@ -492,7 +502,7 @@ def app() -> None:
                 archive_files.append(path)
 
         if not archive_files:
-            st.caption("No matching archive PDFs available to download.")
+            st.caption("No matching archive PDFs available to download.")work
         else:
             for pdf in archive_files[:50]:
                 info = parse_report_filename(pdf)

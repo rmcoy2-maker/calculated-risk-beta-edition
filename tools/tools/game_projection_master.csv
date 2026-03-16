@@ -1,0 +1,118 @@
+season,week,game_id,game_date,commence_time,away_team,home_team,matchup,market_spread_home,market_spread_away,market_total,market_home_ml,market_away_ml,market_home_implied,market_away_implied,power_diff_home,recent_form_diff_home,qb_diff_home,offense_diff_home,defense_diff_home,pace_diff_home,home_field_pts,rest_diff_home,injury_diff_home,weather_penalty_pts,weather_total_penalty,home_score_mean_raw,away_score_mean_raw,proj_margin_raw,proj_total_raw,proj_margin_home,proj_total,proj_home_points,proj_away_points,median_home_points,median_away_points,sim_win_prob_home,sim_win_prob_away,sim_cover_prob_home,sim_cover_prob_away,sim_over_prob,sim_under_prob,home_ml_edge,away_ml_edge,home_spread_edge,away_spread_edge,over_edge,under_edge,best_ml_side,best_ml_edge,best_spread_side,best_spread_line,best_spread_edge,best_total_side,best_total_line,best_total_edge,best_overall_market,best_overall_label,best_overall_edge,best_overall_confidence,fort_knox_score
+
+market_home_implied =
+IF(home_ml > 0, 100 / (home_ml + 100), ABS(home_ml) / (ABS(home_ml) + 100))
+
+market_away_implied =
+IF(away_ml > 0, 100 / (away_ml + 100), ABS(away_ml) / (ABS(away_ml) + 100))
+
+market_spread_away = -1 * market_spread_home
+
+proj_margin_raw =
+0.70 * market_spread_home
++ 0.45 * power_diff_home
++ 0.30 * recent_form_diff_home
++ 0.20 * qb_diff_home
++ 0.15 * offense_diff_home
+- 0.10 * defense_diff_home
++ 1.00 * home_field_pts
++ 0.10 * rest_diff_home
+- 0.10 * injury_diff_home
+
+proj_total_raw =
+market_total
++ 0.60 * pace_diff_home
++ 0.12 * ABS(recent_form_diff_home)
+- weather_total_penalty
+
+proj_margin_home =
+0.75 * market_spread_home
++ 0.25 * proj_margin_raw
+
+proj_total =
+0.78 * market_total
++ 0.22 * proj_total_raw
+
+home_score_mean_raw =
+MAX(10, (proj_total + proj_margin_home) / 2)
+
+away_score_mean_raw =
+MAX(10, (proj_total - proj_margin_home) / 2)
+
+
+proj_home_points = home_score_mean_raw
+proj_away_points = away_score_mean_raw
+
+median_home_points = ROUND(proj_home_points, 0)
+median_away_points = ROUND(proj_away_points, 0)
+
+sim_win_prob_home =
+NORM.DIST(0, proj_margin_home, 6.5, TRUE)
+
+sim_win_prob_away =
+1 - sim_win_prob_home
+
+sim_cover_prob_home =
+1 - NORM.DIST(-market_spread_home, proj_margin_home, 6.5, TRUE)
+
+sim_cover_prob_away =
+1 - sim_cover_prob_home
+
+sim_over_prob =
+1 - NORM.DIST(market_total, proj_total, 10.5, TRUE)
+
+sim_under_prob =
+1 - sim_over_prob
+
+home_ml_edge = sim_win_prob_home - market_home_implied
+away_ml_edge = sim_win_prob_away - market_away_implied
+
+home_spread_edge = sim_cover_prob_home - 0.5238
+away_spread_edge = sim_cover_prob_away - 0.5238
+
+over_edge = sim_over_prob - 0.5238
+under_edge = sim_under_prob - 0.5238
+
+best_ml_side =
+IF(home_ml_edge >= away_ml_edge, home_team + " ML", away_team + " ML")
+
+best_ml_edge =
+MAX(home_ml_edge, away_ml_edge)
+
+best_spread_side =
+IF(home_spread_edge >= away_spread_edge, home_team, away_team)
+
+best_spread_line =
+IF(home_spread_edge >= away_spread_edge, market_spread_home, market_spread_away)
+
+best_spread_edge =
+MAX(home_spread_edge, away_spread_edge)
+
+
+best_total_side =
+IF(over_edge >= under_edge, "Over", "Under")
+
+best_total_line =
+market_total
+
+best_total_edge =
+MAX(over_edge, under_edge)
+
+best_overall_market =
+IF(best_ml_edge >= MAX(best_spread_edge, best_total_edge), "moneyline",
+   IF(best_spread_edge >= MAX(best_ml_edge, best_total_edge), "spread", "total"))
+
+best_overall_edge =
+MAX(best_ml_edge, best_spread_edge, best_total_edge)
+
+best_overall_confidence =
+MIN(95, MAX(40, 55 + 180 * best_overall_edge))
+
+fort_knox_score =
+best_overall_confidence
+
+
+
+
+
+

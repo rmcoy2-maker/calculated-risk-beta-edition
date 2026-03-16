@@ -46,7 +46,7 @@ st.set_page_config(
 
 
 DEFAULT_SEASON = 2025
-DEFAULT_WEEK = 13
+DEFAULT_WEEK = 1
 
 
 EDITION_ORDER = [
@@ -163,11 +163,11 @@ def run_tool_command(args: List[str], description: str, cwd: Path | None = None)
     return completed.returncode
 
 
-def build_status_table(week: int) -> pd.DataFrame:
+def build_status_table(season: int, week: int) -> pd.DataFrame:
     rows: List[EditionRow] = []
 
     for key in EDITION_ORDER:
-        pattern = f"week{week}_{key}_3v1"
+        pattern = f"{season}_week{week}_{key}_3v1"
 
         exists = any(
             p.name.startswith(pattern) and p.suffix.lower() == ".pdf"
@@ -179,7 +179,7 @@ def build_status_table(week: int) -> pd.DataFrame:
                 key=key,
                 name=EDITION_META[key]["name"],
                 timing=EDITION_META[key]["timing"],
-                pdf_file=f"{pattern}_YYYYMMDD_HHMM.pdf",
+                pdf_file=f"{pattern}.pdf",
                 exists=exists,
             )
         )
@@ -198,11 +198,85 @@ def build_status_table(week: int) -> pd.DataFrame:
     )
 
 
-def list_report_files(week: int) -> list[Path]:
-    prefix = f"week{week}_"
-    files = [p for p in REPORTS_DIR.glob("*.pdf") if p.name.startswith(prefix)]
+def list_report_files(season: int, week: int) -> list[Path]:
+    prefixes = [
+        f"{season}_week{week}_",
+        f"week{week}_",
+    ]
+
+    files = [
+        p for p in REPORTS_DIR.glob("*.pdf")
+        if any(p.name.startswith(prefix) for prefix in prefixes)
+    ]
 
     return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def list_all_report_files() -> list[Path]:
+    return sorted(
+        REPORTS_DIR.glob("*.pdf"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def parse_report_filename(path: Path) -> dict:
+    stem = path.stem
+
+    parsed = {
+        "file": path.name,
+        "season": None,
+        "week": None,
+        "edition": "",
+        "edition_name": "",
+        "modified": datetime.fromtimestamp(path.stat().st_mtime),
+        "path": path,
+    }
+
+    parts = stem.split("_")
+
+    if len(parts) >= 4 and parts[0].isdigit() and parts[1].startswith("week"):
+        try:
+            parsed["season"] = int(parts[0])
+            parsed["week"] = int(parts[1].replace("week", ""))
+            parsed["edition"] = "_".join(parts[2:-1])
+        except Exception:
+            pass
+    elif len(parts) >= 3 and parts[0].startswith("week"):
+        try:
+            parsed["week"] = int(parts[0].replace("week", ""))
+            parsed["edition"] = "_".join(parts[1:-1])
+        except Exception:
+            pass
+
+    edition_key = parsed["edition"]
+    if edition_key in EDITION_META:
+        parsed["edition_name"] = EDITION_META[edition_key]["name"]
+    else:
+        parsed["edition_name"] = edition_key or "Unknown"
+
+    return parsed
+
+
+def build_archive_table() -> pd.DataFrame:
+    rows = []
+    for pdf in list_all_report_files():
+        info = parse_report_filename(pdf)
+        rows.append(
+            {
+                "Season": info["season"],
+                "Week": info["week"],
+                "Edition": info["edition"],
+                "Edition Name": info["edition_name"],
+                "File": info["file"],
+                "Modified": info["modified"].strftime("%Y-%m-%d %H:%M"),
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame(columns=["Season", "Week", "Edition", "Edition Name", "File", "Modified"])
+
+    return pd.DataFrame(rows)
 
 
 def app() -> None:
@@ -212,34 +286,42 @@ def app() -> None:
     st.caption(f"Reports dir: {REPORTS_DIR}")
     st.caption(f"App Python: {sys.executable}")
 
-    st.sidebar.title("Report Controls")
+    archive_df = build_archive_table()
 
-    season = st.sidebar.number_input(
+    season_values = sorted({
+        int(x) for x in archive_df["Season"].dropna().tolist()
+        if str(x) != "nan"
+    }) if not archive_df.empty else []
+
+    if DEFAULT_SEASON not in season_values:
+        season_values.append(DEFAULT_SEASON)
+
+    season_values = sorted(set(season_values))
+
+    if not season_values:
+        season_values = [DEFAULT_SEASON]
+
+    week_values = list(range(1, 19))
+    if not archive_df.empty:
+        week_values = sorted(set(week_values) | {
+            int(x) for x in archive_df["Week"].dropna().tolist()
+            if str(x) != "nan"
+        })
+
+    season = st.sidebar.selectbox(
         "Season",
-        min_value=2010,
-        max_value=2100,
-        value=DEFAULT_SEASON,
-        step=1,
+        options=season_values,
+        index=season_values.index(DEFAULT_SEASON) if DEFAULT_SEASON in season_values else 0,
     )
 
-    week = st.sidebar.number_input(
+    week = st.sidebar.selectbox(
         "Week",
-        min_value=1,
-        max_value=25,
-        value=DEFAULT_WEEK,
-        step=1,
-    )
-
-    st.sidebar.subheader("Batch Actions")
-
-    run_all_editions_btn = st.sidebar.button(
-        "Generate ALL 3v1 editions for this week"
+        options=week_values,
+        index=week_values.index(DEFAULT_WEEK) if DEFAULT_WEEK in week_values else 0,
     )
 
     now = datetime.now()
-
     suggested_key = guess_current_edition(now)
-
     suggested_meta = EDITION_META[suggested_key]
 
     st.caption(
@@ -252,7 +334,6 @@ def app() -> None:
     col_auto, col_picker = st.columns([2, 2])
 
     with col_picker:
-
         edition_for_now = st.selectbox(
             "Edition to run",
             options=EDITION_ORDER,
@@ -260,40 +341,16 @@ def app() -> None:
             index=EDITION_ORDER.index(suggested_key),
         )
 
-    with col_auto:
-
-        if st.button("Generate report as of NOW"):
-
-            script = TOOLS_DIR / "generate_report.py"
-
-            asof_now = datetime.now().isoformat(timespec="minutes")
-
-            auto_edition = guess_current_edition(datetime.now())
-
-            run_tool_command(
-                [
-                    sys.executable,
-                    str(script),
-                    "--week",
-                    str(week),
-                    "--edition",
-                    auto_edition,
-                    "--asof",
-                    asof_now,
-                ],
-                description=f"Generate report for NOW ({auto_edition})",
-            )
-
     if st.button("Generate selected edition"):
-
         script = TOOLS_DIR / "generate_report.py"
-
         asof_now = datetime.now().isoformat(timespec="minutes")
 
         run_tool_command(
             [
                 sys.executable,
                 str(script),
+                "--season",
+                str(season),
                 "--week",
                 str(week),
                 "--edition",
@@ -305,33 +362,33 @@ def app() -> None:
         )
 
     st.markdown("---")
+    st.markdown("### Season/Week 3v1 Edition Schedule & File Status")
 
-    st.markdown("### Week-by-Week 3v1 Edition Schedule & File Status")
+    df_status = build_status_table(int(season), int(week))
+    st.dataframe(df_status, hide_index=True, use_container_width=True)
 
-    df_status = build_status_table(int(week))
+    st.markdown("### Existing generated reports for selected season/week")
 
-    st.dataframe(df_status, hide_index=True)
-
-    st.markdown("### Existing generated reports")
-
-    files = list_report_files(int(week))
+    files = list_report_files(int(season), int(week))
 
     if not files:
-
-        st.caption("No generated reports found yet for this week.")
-
+        st.caption("No generated reports found yet for this season/week.")
     else:
-
         for pdf in files:
+            info = parse_report_filename(pdf)
 
             col1, col2 = st.columns([4, 1])
 
             with col1:
-
-                st.write(pdf.name)
+                st.write(
+                    f"**{pdf.name}**"
+                    f"  \nSeason: {info['season'] if info['season'] is not None else 'Unknown'}"
+                    f" | Week: {info['week'] if info['week'] is not None else 'Unknown'}"
+                    f" | Edition: {info['edition_name']}"
+                    f" | Modified: {info['modified'].strftime('%Y-%m-%d %H:%M')}"
+                )
 
             with col2:
-
                 st.download_button(
                     label="Download",
                     data=pdf.read_bytes(),
@@ -340,16 +397,122 @@ def app() -> None:
                     key=f"dl_{pdf.name}",
                 )
 
+    st.markdown("---")
+    st.markdown("### Historical Reports Archive (2020 onward if available)")
+
+    archive_df = build_archive_table()
+
+    if archive_df.empty:
+        st.caption("No report PDFs found in the archive yet.")
+    else:
+        valid_seasons = sorted(
+            [int(x) for x in archive_df["Season"].dropna().unique().tolist()]
+        )
+        archive_season_options = ["All"] + valid_seasons
+
+        archive_col1, archive_col2, archive_col3 = st.columns(3)
+
+        with archive_col1:
+            archive_season = st.selectbox(
+                "Archive Season",
+                options=archive_season_options,
+                index=0 if len(archive_season_options) > 1 else 0,
+            )
+
+        if archive_season == "All":
+            week_options = ["All"] + sorted(
+                [int(x) for x in archive_df["Week"].dropna().unique().tolist()]
+            )
+        else:
+            week_options = ["All"] + sorted(
+                [
+                    int(x) for x in archive_df.loc[
+                        archive_df["Season"] == archive_season, "Week"
+                    ].dropna().unique().tolist()
+                ]
+            )
+
+        with archive_col2:
+            archive_week = st.selectbox(
+                "Archive Week",
+                options=week_options,
+                index=0,
+            )
+
+        if archive_season == "All":
+            edition_options = ["All"] + sorted(
+                archive_df["Edition"].dropna().astype(str).unique().tolist()
+            )
+        else:
+            filt = archive_df["Season"] == archive_season
+            if archive_week != "All":
+                filt = filt & (archive_df["Week"] == archive_week)
+            edition_options = ["All"] + sorted(
+                archive_df.loc[filt, "Edition"].dropna().astype(str).unique().tolist()
+            )
+
+        with archive_col3:
+            archive_edition = st.selectbox(
+                "Archive Edition",
+                options=edition_options,
+                index=0,
+            )
+
+        filtered = archive_df.copy()
+
+        if archive_season != "All":
+            filtered = filtered[filtered["Season"] == archive_season]
+
+        if archive_week != "All":
+            filtered = filtered[filtered["Week"] == archive_week]
+
+        if archive_edition != "All":
+            filtered = filtered[filtered["Edition"] == archive_edition]
+
+        st.dataframe(filtered, hide_index=True, use_container_width=True)
+
+        st.markdown("#### Download from archive")
+
+        archive_files = []
+        for _, row in filtered.iterrows():
+            path = REPORTS_DIR / row["File"]
+            if path.exists():
+                archive_files.append(path)
+
+        if not archive_files:
+            st.caption("No matching archive PDFs available to download.")work
+        else:
+            for pdf in archive_files[:50]:
+                info = parse_report_filename(pdf)
+                col1, col2 = st.columns([4, 1])
+
+                with col1:
+                    st.write(
+                        f"**{pdf.name}**"
+                        f"  \nSeason: {info['season'] if info['season'] is not None else 'Unknown'}"
+                        f" | Week: {info['week'] if info['week'] is not None else 'Unknown'}"
+                        f" | Edition: {info['edition_name']}"
+                    )
+
+                with col2:
+                    st.download_button(
+                        label="Download",
+                        data=pdf.read_bytes(),
+                        file_name=pdf.name,
+                        mime="application/pdf",
+                        key=f"archive_dl_{pdf.name}",
+                    )
+
     if run_all_editions_btn:
-
         script = TOOLS_DIR / "generate_all_editions.py"
-
         asof_now = datetime.now().isoformat(timespec="minutes")
 
         run_tool_command(
             [
                 sys.executable,
                 str(script),
+                "--season",
+                str(season),
                 "--week",
                 str(week),
                 "--asof",
