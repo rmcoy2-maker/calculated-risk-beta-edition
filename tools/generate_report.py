@@ -35,11 +35,9 @@ EDITION_TITLES = {
 class ReportPaths:
     exports_dir: Path
     reports_dir: Path
-    games_path: Path
-    edges_path: Path
-    markets_path: Path
-    scores_path: Path
-    parlay_path: Path
+    historical_odds_path: Path
+    merged_odds_path: Path
+    open_mid_close_path: Path
     json_path: Path
     pdf_path: Path
 
@@ -83,7 +81,6 @@ def _pick_input_base(exports: Path) -> Path:
 def resolve_paths(season: int, week: int, edition: str, reports_dir_arg: str | None = None) -> ReportPaths:
     root = _find_root()
     exports = root / "exports"
-    input_base = _pick_input_base(exports)
 
     if reports_dir_arg:
         reports = Path(reports_dir_arg)
@@ -94,23 +91,18 @@ def resolve_paths(season: int, week: int, edition: str, reports_dir_arg: str | N
     reports.mkdir(parents=True, exist_ok=True)
 
     return ReportPaths(
-        exports_dir=input_base,
+        exports_dir=exports,
         reports_dir=reports,
-        games_path=input_base / f"cr_games_{season}_w{week}.csv",
-        edges_path=input_base / f"cr_edges_{season}_w{week}.csv",
-        markets_path=input_base / f"cr_markets_{season}_w{week}.csv",
-        scores_path=input_base / f"cr_scores_{season}_w{week}.csv",
-        parlay_path=input_base / f"cr_parlay_scores_{season}_w{week}.csv",
-        json_path=reports / f"{season}_week{week}_{edition}_3v1.json"
-        pdf_path=reports / f"{season}_week{week}_{edition}_3v1.pdf"
+        historical_odds_path=exports / "nfl_historical_odds_2020_2025_master.csv",
+        merged_odds_path=exports / "nfl_odds_full_merged.csv",
+        open_mid_close_path=exports / "nfl_open_mid_close_odds.csv",
+        json_path=reports / f"{season}_week{week}_{edition}_3v1.json",
+        pdf_path=reports / f"{season}_week{week}_{edition}_3v1.pdf",
     )
 
-def load_game_projection_master(paths, season: int, week: int) -> pd.DataFrame:
-    candidates = [
-        paths.exports_dir / f"game_projection_master_{season}_w{week}.csv",
-        paths.reports_dir.parent / "canonical" / f"game_projection_master_{season}_w{week}.csv",
-        Path(__file__).resolve().parents[1] / "exports" / "canonical" / f"game_projection_master_{season}_w{week}.csv",
-    ]
+def load_game_projection_master(paths: ReportPaths, season: int, week: int) -> pd.DataFrame:
+    merged = load_csv(paths.merged_odds_path)
+    return filter_season_week(merged, season, week)
 
     for path in candidates:
         if path.exists():
@@ -126,7 +118,22 @@ def load_csv(path: Path) -> pd.DataFrame:
         return pd.read_csv(path, low_memory=False, encoding="utf-8-sig")
     except Exception:
         return pd.read_csv(path, low_memory=False)
+def filter_season_week(df: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
 
+    out = df.copy()
+
+    season_col = find_col(out, ["season", "Season", "YEAR", "year"])
+    week_col = find_col(out, ["week", "Week", "WEEK"])
+
+    if season_col is not None:
+        out = out[pd.to_numeric(out[season_col], errors="coerce") == season]
+
+    if week_col is not None:
+        out = out[pd.to_numeric(out[week_col], errors="coerce") == week]
+
+    return out.reset_index(drop=True)
 
 def lc_map(df: pd.DataFrame) -> dict[str, str]:
     return {str(c).strip().lower(): c for c in df.columns}
@@ -1444,16 +1451,33 @@ def main() -> None:
 
     paths = resolve_paths(args.season, args.week, args.edition, args.reports_dir)
     proj_master = load_game_projection_master(paths, args.season, args.week)
-    games = load_csv(paths.games_path)
-    edges = load_csv(paths.edges_path)
-    markets = load_csv(paths.markets_path)
-    scores = load_csv(paths.scores_path)
-    parlays = load_csv(paths.parlay_path)
 
+    historical = load_csv(paths.historical_odds_path)
+    merged = load_csv(paths.merged_odds_path)
+    open_mid_close = load_csv(paths.open_mid_close_path)
+
+    games = filter_season_week(merged, args.season, args.week)
+    edges = filter_season_week(merged, args.season, args.week)
+    markets = filter_season_week(open_mid_close, args.season, args.week)
+    scores = filter_season_week(historical, args.season, args.week)
+    parlays = pd.DataFrame()
+    print(f"[INFO] season={args.season} week={args.week}")
+    print(f"[INFO] merged rows: {len(merged):,}")
+    print(f"[INFO] historical rows: {len(historical):,}")
+    print(f"[INFO] open_mid_close rows: {len(open_mid_close):,}")
+    print(f"[INFO] games rows after filter: {len(games):,}")
+    print(f"[INFO] edges rows after filter: {len(edges):,}")
+    print(f"[INFO] markets rows after filter: {len(markets):,}")
+    print(f"[INFO] scores rows after filter: {len(scores):,}")
     if games.empty:
-        raise SystemExit(f"Missing or empty games file: {paths.games_path}")
+        raise SystemExit(
+            f"No rows found for season={args.season}, week={args.week} in {paths.merged_odds_path}"
+        )
+
     if edges.empty:
-        raise SystemExit(f"Missing or empty edges file: {paths.edges_path}")
+        print(
+            f"[WARN] No edge rows found for season={args.season}, week={args.week} in {paths.merged_odds_path}"
+        )
 
     edges2 = enrich_edges(edges, games)
     games2 = enrich_games(games, markets, scores)
@@ -1473,12 +1497,7 @@ def main() -> None:
     print(f"[OK] wrote JSON: {paths.json_path}")
 
     if args.write_back_labels:
-        edges_back = edges.copy()
-        for col in ["play_label", "board_label", "game_label", "market_norm", "confidence", "score", "p_win", "edge_prob"]:
-            if col in edges2.columns:
-                edges_back[col] = edges2[col].values
-        edges_back.to_csv(paths.edges_path, index=False)
-        print(f"[OK] stamped edge labels: {paths.edges_path}")
+        print("[WARN] write-back-labels is disabled in master-CSV mode.")
 
         if not parlays.empty:
             parlays_back = parlays.copy()
