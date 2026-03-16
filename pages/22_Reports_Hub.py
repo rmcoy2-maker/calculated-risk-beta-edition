@@ -309,16 +309,21 @@ def app() -> None:
         })
 
     season = st.sidebar.selectbox(
-        "Season",
-        options=season_values,
-        index=season_values.index(DEFAULT_SEASON) if DEFAULT_SEASON in season_values else 0,
-    )
+    "Season",
+    options=season_values,
+    index=season_values.index(DEFAULT_SEASON) if DEFAULT_SEASON in season_values else 0,
+)
 
-    week = st.sidebar.selectbox(
-        "Week",
-        options=week_values,
-        index=week_values.index(DEFAULT_WEEK) if DEFAULT_WEEK in week_values else 0,
-    )
+week = st.sidebar.selectbox(
+    "Week",
+    options=week_values,
+    index=week_values.index(DEFAULT_WEEK) if DEFAULT_WEEK in week_values else 0,
+)
+
+asof_input = st.sidebar.text_input(
+    "As Of (YYYY-MM-DDTHH:MM)",
+    value=datetime.now().isoformat(timespec="minutes"),
+)
 
     now = datetime.now()
     suggested_key = guess_current_edition(now)
@@ -365,7 +370,7 @@ def app() -> None:
     st.markdown("### Season/Week 3v1 Edition Schedule & File Status")
 
     df_status = build_status_table(int(season), int(week))
-    st.dataframe(df_status, hide_index=True, use_container_width=True)
+    st.dataframe(df_status, hide_index=True, use_container_width=stretch)
 
     st.markdown("### Existing generated reports for selected season/week")
 
@@ -504,28 +509,29 @@ def app() -> None:
                     )
 
     st.markdown("---")
-    run_all_editions_btn = st.button(
-        "Generate ALL 3v1 Editions",
-        key="run_all_editions_btn",
+
+run_all_editions_btn = st.button(
+    "Generate ALL 3v1 Editions",
+    key="run_all_editions_btn",
+)
+
+if run_all_editions_btn:
+    script = TOOLS_DIR / "generate_all_editions.py"
+    asof_now = asof_input
+
+    run_tool_command(
+        [
+            sys.executable,
+            str(script),
+            "--season",
+            str(season),
+            "--week",
+            str(week),
+            "--asof",
+            asof_now,
+        ],
+        description="Generate ALL 3v1 editions",
     )
-
-    if run_all_editions_btn:
-        script = TOOLS_DIR / "generate_all_editions.py"
-        asof_now = datetime.now().isoformat(timespec="minutes")
-
-        run_tool_command(
-            [
-                sys.executable,
-                str(script),
-                "--season",
-                str(season),
-                "--week",
-                str(week),
-                "--asof",
-                asof_now,
-            ],
-            description="Generate ALL 3v1 editions",
-        )
 
 
 app()
