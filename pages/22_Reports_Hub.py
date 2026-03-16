@@ -503,25 +503,29 @@ def app() -> None:
                         key=f"archive_dl_{pdf.name}",
                     )
 
-run_all_editions_btn = st.button("Generate ALL 3v1 Editions")
-
-run_all_editions_btn = st.button("Generate ALL 3v1 Editions")
-
-if run_all_editions_btn:
-    script = TOOLS_DIR / "generate_all_editions.py"
-    asof_now = datetime.now().isoformat(timespec="minutes")
-
-    run_tool_command(
-        [
-            sys.executable,
-            str(script),
-            "--season",
-            str(season),
-            "--week",
-            str(week),
-            "--asof",
-            asof_now,
-        ],
-        description="Generate ALL 3v1 editions",
+    st.markdown("---")
+    run_all_editions_btn = st.button(
+        "Generate ALL 3v1 Editions",
+        key="run_all_editions_btn",
     )
+
+    if run_all_editions_btn:
+        script = TOOLS_DIR / "generate_all_editions.py"
+        asof_now = datetime.now().isoformat(timespec="minutes")
+
+        run_tool_command(
+            [
+                sys.executable,
+                str(script),
+                "--season",
+                str(season),
+                "--week",
+                str(week),
+                "--asof",
+                asof_now,
+            ],
+            description="Generate ALL 3v1 editions",
+        )
+
+
 app()
