@@ -46,7 +46,7 @@ st.set_page_config(
 
 
 DEFAULT_SEASON = 2025
-DEFAULT_WEEK = 13
+DEFAULT_WEEK = 1
 
 
 EDITION_ORDER = [
@@ -492,7 +492,7 @@ def app() -> None:
                 archive_files.append(path)
 
         if not archive_files:
-            st.caption("No matching archive PDFs available to download.")work
+            st.caption("No matching archive PDFs available to download.")
         else:
             for pdf in archive_files[:50]:
                 info = parse_report_filename(pdf)
