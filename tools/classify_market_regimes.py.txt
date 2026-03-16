@@ -1,0 +1,49 @@
+import pandas as pd
+import numpy as np
+
+PATH = r"C:\Projects\calculated-risk-beta-edition\exports\fort_knox_market_joined_moneyline.csv"
+OUT = r"C:\Projects\calculated-risk-beta-edition\exports\fort_knox_market_regimes.csv"
+
+df = pd.read_csv(PATH)
+
+# Safety: rebuild these if needed
+df["model_edge_vs_open"] = df["model_prob"] - df["open_prob"]
+df["model_edge_vs_mid"] = df["model_prob"] - df["mid_prob"]
+df["model_edge_vs_close"] = df["model_prob"] - df["close_prob"]
+
+# Positive movement means market probability rose toward your selected side
+df["open_to_mid_prob_move"] = df["mid_prob"] - df["open_prob"]
+df["mid_to_close_prob_move"] = df["close_prob"] - df["mid_prob"]
+df["open_to_close_prob_move"] = df["close_prob"] - df["open_prob"]
+
+# Direction buckets
+def classify_row(row):
+    e1 = row["open_to_mid_prob_move"]
+    e2 = row["mid_to_close_prob_move"]
+
+    if pd.isna(e1) or pd.isna(e2):
+        return "unknown"
+
+    if e1 > 0 and e2 > 0:
+        return "confirmed_all_week"
+    if e1 > 0 and e2 <= 0:
+        return "sharp_early_then_fade"
+    if e1 <= 0 and e2 > 0:
+        return "late_confirmation"
+    return "faded_all_week"
+
+df["market_regime"] = df.apply(classify_row, axis=1)
+df["hit"] = (df["profit"] > 0).astype(int)
+
+summary = df.groupby("market_regime").agg(
+    bets=("profit", "size"),
+    hit_rate=("hit", "mean"),
+    roi=("profit", lambda s: s.sum() / len(s)),
+    avg_model_edge_open=("model_edge_vs_open", "mean"),
+    avg_model_edge_close=("model_edge_vs_close", "mean"),
+).reset_index()
+
+print(summary.sort_values("roi", ascending=False))
+
+df.to_csv(OUT, index=False)
+print(f"Saved: {OUT}")

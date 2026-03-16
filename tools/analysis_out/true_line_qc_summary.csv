@@ -1,0 +1,11 @@
+metric,value
+rows,2482
+rows_with_model_prob,0
+rows_with_cal_prob,0
+rows_with_real_cal_prob,0
+rows_with_cal_fallback,2482
+rows_with_market_odds,0
+rows_with_profit,0
+rows_with_actual_win,0
+rows_with_edge_prob_governed,0
+rows_with_confidence_score,2482

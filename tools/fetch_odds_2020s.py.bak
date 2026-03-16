@@ -1,0 +1,197 @@
+import os, time, math, sys, json, re
+from datetime import datetime, timedelta, timezone, date
+import requests
+import pandas as pd
+
+API_KEY = os.getenv("ODDS_API_KEY")  # <-- set this in your shell; do NOT hardcode here
+SPORT   = "americanfootball_nfl"
+REGION  = "us"          # or "us2"
+MARKETS = "h2h,spreads,totals"
+ODDSFMT = "american"
+DATEFMT = "iso"
+
+# ---- helpers ----
+TEAM_ALIAS = {
+    "WASHINGTON": "COMMANDERS", "WASHINGTON FOOTBALL TEAM": "COMMANDERS", "REDSKINS": "COMMANDERS",
+    "LAS VEGAS RAIDERS":"RAIDERS","OAKLAND RAIDERS":"RAIDERS","LA RAIDERS":"RAIDERS",
+    "SAN DIEGO CHARGERS":"CHARGERS","LOS ANGELES CHARGERS":"CHARGERS",
+    "ST. LOUIS RAMS":"RAMS","LOS ANGELES RAMS":"RAMS",
+    "N.E. PATRIOTS":"PATRIOTS","S.F. 49ERS":"49ERS","S.F.":"49ERS","N.O. SAINTS":"SAINTS",
+}
+def canon_team(name:str)->str:
+    s = re.sub(r"[^A-Za-z0-9 ]+", " ", str(name)).upper().strip()
+    s = re.sub(r"\s+"," ",s)
+    return TEAM_ALIAS.get(s, s)
+
+def gid_from(commence_iso:str, away:str, home:str)->str:
+    ymd = datetime.fromisoformat(commence_iso.replace("Z","+00:00")).date().strftime("%Y%m%d")
+    return f"{ymd}_{away}_AT_{home}"
+
+def http_get(url, params, retries=3, sleep=1.5):
+    last = None
+    for i in range(retries+1):
+        try:
+            r = requests.get(url, params=params, timeout=30)
+            if r.status_code == 429:
+                # rate limited – use quota headers if present
+                time.sleep(5 + i)
+                continue
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            last = e
+            time.sleep(sleep*(i+1))
+    raise last
+
+def pick_market(book, key):
+    for m in book.get("markets", []):
+        if m.get("key") == key:
+            return m
+    return None
+
+def extract_prices(event, book, when_iso):
+    rows = []
+    bm = book.get("title")
+    for m in book.get("markets", []):
+        key = m.get("key")
+        for outc in m.get("outcomes", []):
+            row = {
+                "event_id": event["id"],
+                "commence_time": event["commence_time"],
+                "captured_at": when_iso,
+                "home_team": canon_team(event.get("home_team")),
+                "away_team": canon_team(event.get("away_team")),
+                "book": bm,
+                "market": key,
+                "name": outc.get("name"),
+                "price": outc.get("price"),
+                "point": outc.get("point"),
+            }
+            rows.append(row)
+    return rows
+
+def consensus_close(rows_df):
+    # Pivot into one row per game_id, averaging points where relevant and picking moneyline prices per side if present
+    if rows_df.empty: 
+        return pd.DataFrame()
+    # derive game_id
+    rows_df["away_team"] = rows_df["away_team"].map(canon_team)
+    rows_df["home_team"] = rows_df["home_team"].map(canon_team)
+    rows_df["game_date"] = pd.to_datetime(rows_df["commence_time"]).dt.date.astype(str)
+    rows_df["game_id"] = rows_df["game_date"].str.replace("-","",regex=False) + "_" + rows_df["away_team"] + "_AT_" + rows_df["home_team"]
+
+    # spreads: point is spread for the outcome's team (negative for fav). We'll compute mean absolute and re-apply sign using favorite=lower ML price when possible.
+    s = rows_df[rows_df["market"]=="spreads"].copy()
+    t = rows_df[rows_df["market"]=="totals"].copy()
+    h = rows_df[rows_df["market"]=="h2h"].copy()
+
+    # consensus totals
+    totals = (t.groupby(["game_id"])["point"].mean().rename("total_close").reset_index()
+                if not t.empty else pd.DataFrame(columns=["game_id","total_close"]))
+
+    # consensus spreads: average of absolute points, then assign sign so home=negative if home ML price < away ML price
+    ml = {}
+    if not h.empty:
+        tmp = h.pivot_table(index=["game_id","name"], values="price", aggfunc="mean").reset_index()
+        for _,r in tmp.groupby("game_id"):
+            g = r.set_index("name")["price"].to_dict()
+            ml[r["game_id"].iloc[0]] = g
+    spread_mean = (s.assign(abspt=lambda x: x["point"].abs())
+                     .groupby("game_id")["abspt"].mean()
+                     .rename("spread_abs").reset_index()) if not s.empty else pd.DataFrame(columns=["game_id","spread_abs"])
+    if not spread_mean.empty:
+        spread_mean["spread_close"] = spread_mean["spread_abs"]  # default positive (away +)
+        # try to set sign based on favorite (lower price)
+        def signed(row):
+            gid = row["game_id"]
+            fav = None
+            if gid in ml:
+                g = ml[gid]
+                home_p = g.get("Home") or g.get("HOME") or g.get(rows_df.loc[rows_df["game_id"]==gid,"home_team"].iloc[0])
+                away_p = g.get("Away") or g.get("AWAY") or g.get(rows_df.loc[rows_df["game_id"]==gid,"away_team"].iloc[0])
+                if home_p is not None and away_p is not None:
+                    fav = "home" if abs(home_p) < abs(away_p) else "away"
+            return -row["spread_abs"] if fav=="home" else row["spread_abs"]
+        spread_mean["spread_close"] = spread_mean.apply(signed, axis=1)
+        spreads = spread_mean[["game_id","spread_close"]]
+    else:
+        spreads = pd.DataFrame(columns=["game_id","spread_close"])
+
+    # join minimal consensus
+    out = pd.merge(spreads, totals, on="game_id", how="outer")
+    out["ml_home"] = pd.NA
+    out["ml_away"] = pd.NA
+    return out
+
+# ---- main ----
+def run(start_date="2020-09-01", end_date="2025-12-31", out_raw="odds_raw_perbook.csv", out_cons="odds_closing_consensus.csv"):
+    if not API_KEY:
+        raise SystemExit("Set your API key first:  setx ODDS_API_KEY YOUR_KEY_HERE  (then restart terminal)")
+    base = "https://api.the-odds-api.com/v4"
+    raw_rows = []
+
+    # daily loop (you can tighten to NFL season dates)
+    start = datetime.fromisoformat(start_date).date()
+    end   = datetime.fromisoformat(end_date).date()
+    d = start
+    seen = set()
+    while d <= end:
+        # 1) list events (historical) at midday UTC for that date
+        snap = datetime(d.year, d.month, d.day, 12, 0, 0, tzinfo=timezone.utc).isoformat()
+        ev_url = f"{base}/historical/sports/{SPORT}/events"
+        ev = http_get(ev_url, {
+            "apiKey": API_KEY,
+            "date": snap,
+            "regions": REGION
+        })
+        # 2) for each event occurring that calendar day, fetch odds at commence_time (near closing)
+        for e in ev:
+            cid = e["id"]
+            ciso = e["commence_time"]  # ISO str
+            cdate = datetime.fromisoformat(ciso.replace("Z","+00:00")).date()
+            if cdate != d:
+                continue
+            key = (cid, ciso)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            od_url = f"{base}/historical/sports/{SPORT}/events/{cid}/odds"
+            od = http_get(od_url, {
+                "apiKey": API_KEY,
+                "regions": REGION,
+                "markets": MARKETS,
+                "oddsFormat": ODDSFMT,
+                "dateFormat": DATEFMT,
+                "date": ciso
+            })
+            # flatten
+            for bk in od.get("bookmakers", []):
+                raw_rows += extract_prices(e, bk, ciso)
+        # be nice to the API
+        time.sleep(0.7)
+        d += timedelta(days=1)
+
+    raw_df = pd.DataFrame(raw_rows)
+    raw_df.to_csv(out_raw, index=False, encoding="utf-8-sig")
+
+    # consensus “close”
+    cons = consensus_close(raw_df)
+    # add teams and dates for merge friendliness
+    if not raw_df.empty:
+        add = raw_df[["game_id","game_date","home_team","away_team"]].drop_duplicates()
+        cons = cons.merge(add, on="game_id", how="left")
+        cons["market"] = "GAME"
+        cons["book"] = ""
+        cons["source"] = "ODDSAPI_V4_HIST"
+        cons["asof_ts"] = pd.Timestamp.utcnow().isoformat()
+    cons.to_csv(out_cons, index=False, encoding="utf-8-sig")
+    print(f"Saved {out_raw} ({len(raw_df)} rows) and {out_cons} ({len(cons)} rows).")
+
+if __name__ == "__main__":
+    # adjust the window to the exact seasons you want
+    run(start_date="2020-01-01", end_date="2025-12-31",
+        out_raw="odds_raw_perbook.csv",
+        out_cons="odds_closing_consensus.csv")
+
+

@@ -1,0 +1,11 @@
+metric,value
+rows,965
+rows_with_model_prob,965
+rows_with_cal_prob,965
+rows_with_real_cal_prob,0
+rows_with_cal_fallback,965
+rows_with_market_odds,781
+rows_with_open_odds,781
+rows_with_close_odds,781
+rows_with_profit,965
+rows_with_actual_win,965

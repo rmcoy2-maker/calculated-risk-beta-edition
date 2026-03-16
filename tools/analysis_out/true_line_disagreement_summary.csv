@@ -1,0 +1,10 @@
+Season,disagreement_bucket,bets,wins,roi,hit_rate,avg_true_prob,avg_market_prob,avg_edge_market,avg_edge_open,avg_edge_close,avg_edge_governed,avg_otm_move,avg_mtc_move,avg_ev,avg_ev_governed,avg_hybrid_score,avg_confidence_score,avg_edge_shrunk_35,avg_edge_shrunk_40,avg_edge_shrunk_50,avg_disagreement_abs,avg_governed_weight
+2017,Unknown,267,0.0,,,,,,,,,,,,,0.0,0.0,,,,,0.6790262172284645
+2018,Unknown,267,0.0,,,,,,,,,,,,,0.0,0.0,,,,,0.6777153558052434
+2019,Unknown,267,0.0,,,,,,,,,,,,,0.0,0.0,,,,,0.6777153558052434
+2020,Unknown,269,0.0,,,,,,,,,,,,,0.0,0.0,,,,,0.678996282527881
+2021,Unknown,285,0.0,,,,,,,,,,,,,0.0,0.0,,,,,0.6819298245614035
+2022,Unknown,285,0.0,,,,,,,,,,,,,0.0,0.0,,,,,0.6815789473684211
+2023,Unknown,285,0.0,,,,,,,,,,,,,0.0,0.0,,,,,0.6819298245614035
+2024,Unknown,285,0.0,,,,,,,,,,,,,0.0,0.0,,,,,0.6815789473684211
+2025,Unknown,272,0.0,,,,,,,,,,,,,0.0,0.0,,,,,0.6790441176470587

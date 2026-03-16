@@ -1,0 +1,10 @@
+{
+  "test_season": 2025,
+  "train_rows": 2210,
+  "test_rows": 272,
+  "feature_count": 120,
+  "win_accuracy": 0.5588235294117647,
+  "win_auc": 0.6719469515564561,
+  "spread_mae": 7.925128660575663,
+  "total_mae": 24.475257524570626
+}
