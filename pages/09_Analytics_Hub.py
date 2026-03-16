@@ -151,12 +151,6 @@ def _safe_read_csv(path: Path | None, label: str) -> pd.DataFrame:
 def load_data():
     root = _exports_dir()
 
-    st.write("Using exports dir:", str(root))
-    if root.exists():
-        st.write("Files in exports:", sorted([p.name for p in root.glob("*")]))
-    else:
-        st.write("Files in exports:", [])
-
     edges_path = _pick_latest_file(
         root,
         preferred_names=[
@@ -572,7 +566,7 @@ teams = sorted(set(teams_home).union(set(teams_away)))
 if not teams:
     st.error("Scores file loaded, but no usable home/away team columns were found.")
     st.write("Detected columns:", list(scores.columns))
-    st.dataframe(scores.head(10), width="stretch")
+    st.dataframe(scores.head(10), use_container_width=True)
     st.stop()
 
 all_seasons = _season_values_from_scores(scores)
@@ -704,6 +698,345 @@ def market_context(sc: pd.DataFrame, home: str, away: str, season: int | None, l
     return out
 
 
+def load_team_market_outperformance(min_games: int = 6) -> pd.DataFrame:
+    root = _exports_dir()
+    market_probs_path = _pick_latest_file(
+        root,
+        preferred_names=[
+            "games_master_with_market_probs.csv",
+            "fort_knox_market_joined_moneyline.csv",
+        ],
+        glob_patterns=[
+            "*market*probs*.csv",
+            "*market_joined*moneyline*.csv",
+            "*games_master*market*.csv",
+        ],
+    )
+
+    df = _safe_read_csv(market_probs_path, "Market probability")
+    if df.empty:
+        return pd.DataFrame()
+
+    df = _ensure_home_away_columns(df)
+    df = _ensure_score_columns(df)
+    df = _ensure_date_column(df)
+    df = _ensure_season_column(df)
+
+    df["market_prob_home"] = pd.to_numeric(
+        _pick_ci(df, "market_prob_home", "home_market_prob", "implied_prob_home", "home_implied_prob"),
+        errors="coerce",
+    )
+    df["market_prob_away"] = pd.to_numeric(
+        _pick_ci(df, "market_prob_away", "away_market_prob", "implied_prob_away", "away_implied_prob"),
+        errors="coerce",
+    )
+
+    needed = ["home", "away", "home_score", "away_score", "market_prob_home", "market_prob_away"]
+    df = df.dropna(subset=needed).copy()
+    if df.empty:
+        return pd.DataFrame()
+
+    df["game_date"] = pd.to_datetime(df.get("date"), errors="coerce")
+    df["expected_win_home"] = df["market_prob_home"]
+    df["expected_win_away"] = df["market_prob_away"]
+    df["home_win"] = (df["home_score"] > df["away_score"]).astype(int)
+    df["away_win"] = 1 - df["home_win"]
+
+    home_games = pd.DataFrame(
+        {
+            "team": df["home"],
+            "expected": df["expected_win_home"],
+            "actual": df["home_win"],
+            "game_date": df["game_date"],
+        }
+    )
+    away_games = pd.DataFrame(
+        {
+            "team": df["away"],
+            "expected": df["expected_win_away"],
+            "actual": df["away_win"],
+            "game_date": df["game_date"],
+        }
+    )
+
+    games = pd.concat([home_games, away_games], ignore_index=True)
+    games = games.dropna(subset=["team", "expected", "actual"]).copy()
+    if games.empty:
+        return pd.DataFrame()
+
+    games["team"] = games["team"].astype("string").str.strip()
+    games = games[games["team"].notna() & (games["team"] != "")].copy()
+    games = games.sort_values(["team", "game_date"], na_position="first")
+
+    total = games.groupby("team").agg(
+        games=("actual", "count"),
+        actual=("actual", "sum"),
+        expected=("expected", "sum"),
+    )
+    total["diff"] = total["actual"] - total["expected"]
+    total["diff_per_game"] = total["diff"] / total["games"].replace(0, np.nan)
+    total["signal_strength"] = total["diff_per_game"].abs() * np.sqrt(total["games"])
+
+    last8 = (
+        games.groupby("team", group_keys=False)
+        .tail(8)
+        .groupby("team")
+        .agg(actual=("actual", "sum"), expected=("expected", "sum"), games_last8=("actual", "count"))
+    )
+    last8["diff_last8"] = last8["actual"] - last8["expected"]
+    last8["diff_per_game_last8"] = last8["diff_last8"] / last8["games_last8"].replace(0, np.nan)
+
+    last4 = (
+        games.groupby("team", group_keys=False)
+        .tail(4)
+        .groupby("team")
+        .agg(actual=("actual", "sum"), expected=("expected", "sum"), games_last4=("actual", "count"))
+    )
+    last4["diff_last4"] = last4["actual"] - last4["expected"]
+    last4["diff_per_game_last4"] = last4["diff_last4"] / last4["games_last4"].replace(0, np.nan)
+
+    teams_df = total.join(last8[["games_last8", "diff_last8", "diff_per_game_last8"]], how="left")
+    teams_df = teams_df.join(last4[["games_last4", "diff_last4", "diff_per_game_last4"]], how="left")
+
+    teams_df = teams_df[teams_df["games"] >= int(min_games)].copy()
+    if teams_df.empty:
+        return pd.DataFrame()
+
+    teams_df["tier"] = "Average"
+    teams_df.loc[teams_df["diff_per_game"] >= 0.30, "tier"] = "Elite Overperformer"
+    teams_df.loc[(teams_df["diff_per_game"] >= 0.10) & (teams_df["diff_per_game"] < 0.30), "tier"] = "Slight Overperformer"
+    teams_df.loc[(teams_df["diff_per_game"] <= -0.10) & (teams_df["diff_per_game"] > -0.30), "tier"] = "Slight Underperformer"
+    teams_df.loc[teams_df["diff_per_game"] <= -0.30, "tier"] = "Poor Underperformer"
+
+    teams_df["regression_trap"] = np.where(
+        (teams_df["diff"] > 0) & (teams_df["diff_last4"] < 0),
+        "Yes",
+        "No",
+    )
+
+    teams_df = teams_df.reset_index().rename(columns={"index": "team"})
+
+    round_cols = [
+        "actual", "expected", "diff", "diff_per_game", "signal_strength",
+        "diff_last8", "diff_per_game_last8", "diff_last4", "diff_per_game_last4",
+    ]
+    for col in round_cols:
+        if col in teams_df.columns:
+            teams_df[col] = pd.to_numeric(teams_df[col], errors="coerce").round(3)
+
+    for col in ["games", "games_last8", "games_last4"]:
+        if col in teams_df.columns:
+            teams_df[col] = pd.to_numeric(teams_df[col], errors="coerce").fillna(0).astype(int)
+
+    return teams_df.sort_values(["diff_per_game", "diff"], ascending=False).reset_index(drop=True)
+
+
+
+
+# ------------------ Model Validation Helpers ------------------
+def _safe_div(a, b):
+    try:
+        if b in [0, 0.0] or pd.isna(b):
+            return np.nan
+        return a / b
+    except Exception:
+        return np.nan
+
+
+def _american_to_decimal(odds):
+    try:
+        x = float(odds)
+    except Exception:
+        return np.nan
+    if x == 0:
+        return np.nan
+    if x > 0:
+        return 1.0 + (x / 100.0)
+    return 1.0 + (100.0 / abs(x))
+
+
+def _best_series(df: pd.DataFrame, *names: str, numeric: bool = False) -> pd.Series:
+    s = _pick_ci(df, *names)
+    if numeric:
+        return pd.to_numeric(s, errors="coerce")
+    return s
+
+
+@st.cache_data(show_spinner=False)
+def load_model_validation_dataset() -> pd.DataFrame:
+    root = _exports_dir()
+    path = _pick_latest_file(
+        root,
+        preferred_names=[
+            'fort_knox_market_joined_moneyline.csv',
+            'games_master_with_market_probs.csv',
+            'games_master_with_team_market_features.csv',
+            'edges_standardized.csv',
+            'edges_graded_full_normalized_std.csv',
+            'edges_graded_full.csv',
+            'edges_normalized.csv',
+            'edges.csv',
+        ],
+        glob_patterns=[
+            '*fort*knox*market*joined*.csv',
+            '*games_master*market*prob*.csv',
+            '*games_master*team_market_features*.csv',
+            '*edges*standardized*.csv',
+            '*edges*graded*.csv',
+            '*edges*normalized*.csv',
+            '*edges*.csv',
+        ],
+    )
+    return _safe_read_csv(path, 'Model Validation') if path else pd.DataFrame()
+
+
+def prepare_model_validation_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    work = df.copy()
+    work.columns = [str(c) for c in work.columns]
+
+    work['model_prob'] = _best_series(work, 'model_prob', 'edge_prob_governed', 'prob_model', 'pred_prob', numeric=True)
+    work['bet_prob'] = _best_series(work, 'implied_prob', 'bet_prob', 'market_prob_at_bet', 'prob_at_bet', 'open_prob', numeric=True)
+    work['open_prob'] = _best_series(work, 'open_prob', 'market_prob_open', 'prob_open', numeric=True)
+    work['mid_prob'] = _best_series(work, 'mid_prob', 'market_prob_mid', 'prob_mid', numeric=True)
+    work['close_prob'] = _best_series(work, 'close_prob', 'market_prob_close', 'closing_prob', 'prob_close', numeric=True)
+
+    if work['bet_prob'].isna().all() and not work['open_prob'].isna().all():
+        work['bet_prob'] = work['open_prob']
+
+    work['edge_vs_bet'] = work['model_prob'] - work['bet_prob']
+    work['edge_vs_open'] = _best_series(work, 'model_edge_vs_open', 'edge_vs_open', numeric=True)
+    work['edge_vs_mid'] = _best_series(work, 'model_edge_vs_mid', 'edge_vs_mid', numeric=True)
+    work['edge_vs_close'] = _best_series(work, 'model_edge_vs_close', 'edge_vs_close', numeric=True)
+
+    if work['edge_vs_open'].isna().all() and not work['open_prob'].isna().all():
+        work['edge_vs_open'] = work['model_prob'] - work['open_prob']
+    if work['edge_vs_mid'].isna().all() and not work['mid_prob'].isna().all():
+        work['edge_vs_mid'] = work['model_prob'] - work['mid_prob']
+    if work['edge_vs_close'].isna().all() and not work['close_prob'].isna().all():
+        work['edge_vs_close'] = work['model_prob'] - work['close_prob']
+
+    work['clv'] = work['close_prob'] - work['bet_prob']
+    work['beat_close'] = np.where(work['clv'].notna(), work['clv'] > 0, np.nan)
+
+    work['profit'] = _best_series(work, 'profit', 'pnl', 'net_profit', numeric=True)
+    work['stake'] = _best_series(work, 'stake', 'risk', 'risk_units', numeric=True)
+    work.loc[work['stake'].isna() | (work['stake'] <= 0), 'stake'] = 1.0
+
+    hit = _best_series(work, 'hit', 'actual_win', 'win', 'won', numeric=True)
+    hit = hit.where(hit.isin([0, 1]), np.nan)
+    if hit.isna().all():
+        try:
+            h2 = _best_series(work, 'result', 'graded_result').astype('string').str.lower()
+            hit = np.where(h2.isin(['w', 'win', 'won']), 1, np.where(h2.isin(['l', 'loss', 'lost']), 0, np.nan))
+            hit = pd.Series(hit, index=work.index, dtype='float')
+        except Exception:
+            hit = pd.Series(np.nan, index=work.index, dtype='float')
+    work['hit'] = pd.to_numeric(hit, errors='coerce')
+
+    odds_candidates = _best_series(work, 'true_moneyline', 'closing_odds', 'close_price', 'open_price', 'mid_price', 'odds', 'price', numeric=True)
+    dec = odds_candidates.apply(_american_to_decimal)
+    dec = dec.where(dec > 1, np.nan)
+    work['decimal_odds'] = dec
+    work['expected_profit_per_unit'] = (work['model_prob'] * (work['decimal_odds'] - 1.0)) - (1.0 - work['model_prob'])
+
+    work['realized_roi'] = work['profit'] / work['stake']
+    work['expected_roi'] = work['expected_profit_per_unit'] / work['stake']
+
+    move = work['close_prob'] - work['bet_prob']
+    model_dir = np.sign(work['model_prob'] - work['bet_prob'])
+    move_dir = np.sign(move)
+    work['line_move_agreement'] = np.where(
+        model_dir != 0,
+        model_dir == move_dir,
+        np.nan,
+    )
+
+    work['prob_bucket'] = pd.cut(
+        work['model_prob'],
+        bins=[0.0, 0.5, 0.6, 0.7, 0.8, 1.0],
+        include_lowest=True,
+        right=False,
+        labels=['0.00-0.50', '0.50-0.60', '0.60-0.70', '0.70-0.80', '0.80-1.00'],
+    )
+
+    ts = _best_series(work, 'timestamp', 'game_date', 'date', 'Date')
+    work['timestamp'] = pd.to_datetime(ts, errors='coerce')
+
+    return work
+
+
+def model_validation_payload(df: pd.DataFrame) -> dict[str, object]:
+    work = prepare_model_validation_df(df)
+    if work.empty:
+        return {'work': pd.DataFrame(), 'metrics': {}}
+
+    settled = work[work['hit'].notna()].copy()
+    if settled.empty:
+        settled = work.copy()
+
+    metrics = {
+        'sample_size': int(len(work)),
+        'settled_bets': int(len(settled)),
+        'avg_clv': float(work['clv'].mean()) if work['clv'].notna().any() else np.nan,
+        'beat_close_rate': float(pd.Series(work['beat_close']).dropna().astype(float).mean()) if pd.Series(work['beat_close']).notna().any() else np.nan,
+        'avg_edge_vs_bet': float(work['edge_vs_bet'].mean()) if work['edge_vs_bet'].notna().any() else np.nan,
+        'avg_edge_vs_open': float(work['edge_vs_open'].mean()) if work['edge_vs_open'].notna().any() else np.nan,
+        'avg_edge_vs_mid': float(work['edge_vs_mid'].mean()) if work['edge_vs_mid'].notna().any() else np.nan,
+        'avg_edge_vs_close': float(work['edge_vs_close'].mean()) if work['edge_vs_close'].notna().any() else np.nan,
+        'actual_roi': float(_safe_div(settled['profit'].sum(), settled['stake'].sum())) if {'profit', 'stake'}.issubset(settled.columns) else np.nan,
+        'expected_roi': float(settled['expected_roi'].mean()) if settled['expected_roi'].notna().any() else np.nan,
+        'line_move_agreement': float(pd.Series(work['line_move_agreement']).dropna().astype(float).mean()) if pd.Series(work['line_move_agreement']).notna().any() else np.nan,
+        'filter_kept_rate': float((work['edge_vs_bet'] > 0).mean()) if work['edge_vs_bet'].notna().any() else np.nan,
+    }
+
+    cal = settled[['model_prob', 'hit']].dropna().copy()
+    if not cal.empty:
+        cal['bucket'] = pd.cut(cal['model_prob'], bins=np.linspace(0, 1, 11), include_lowest=True)
+        calibration = cal.groupby('bucket', observed=False).agg(
+            predicted=('model_prob', 'mean'),
+            actual=('hit', 'mean'),
+            bets=('hit', 'size'),
+        ).reset_index()
+        calibration['bucket_label'] = calibration['bucket'].astype(str)
+    else:
+        calibration = pd.DataFrame()
+
+    roi_bucket = settled.groupby('prob_bucket', observed=False).agg(
+        bets=('hit', 'size'),
+        win_rate=('hit', 'mean'),
+        roi=('realized_roi', 'mean'),
+        expected_roi=('expected_roi', 'mean'),
+        avg_edge=('edge_vs_bet', 'mean'),
+    ).reset_index()
+
+    market_stage = pd.DataFrame({
+        'stage': ['Open', 'Mid', 'Close'],
+        'edge': [metrics['avg_edge_vs_open'], metrics['avg_edge_vs_mid'], metrics['avg_edge_vs_close']],
+    })
+
+    filter_funnel = pd.DataFrame({
+        'stage': ['Initial rows', 'Rows with model prob', 'Positive edge rows', 'Settled rows'],
+        'rows': [
+            len(work),
+            int(work['model_prob'].notna().sum()),
+            int((work['edge_vs_bet'] > 0).sum()) if work['edge_vs_bet'].notna().any() else 0,
+            len(settled),
+        ],
+    })
+
+    return {
+        'work': work,
+        'settled': settled,
+        'metrics': metrics,
+        'calibration': calibration,
+        'roi_bucket': roi_bucket,
+        'market_stage': market_stage,
+        'filter_funnel': filter_funnel,
+    }
+
 # ------------------ UI ------------------
 st.title("📊 Analytics Hub")
 st.caption("Dual-mode analytics with tiered feature gating (Basic / Advanced / Premium)")
@@ -722,7 +1055,7 @@ else:
     tier = "premium"
     st.sidebar.success("Premium tier active")
 
-mode = st.radio("Mode", ["Team Profile", "Market / Matchup"], horizontal=True)
+mode = st.radio("Mode", ["Team Profile", "Market / Matchup", "Model Validation"], horizontal=True)
 
 if mode == "Team Profile":
     col_sel, col_season = st.columns([2, 1])
@@ -783,11 +1116,11 @@ if mode == "Team Profile":
         }
     )
 
-    st.dataframe(show.to_frame("Value"), width="stretch")
+    st.dataframe(show.to_frame("Value"), use_container_width=True)
 
     if has_feature(tier, "team", "splits_home_away") and "splits_home_away" in res:
         st.markdown("### Home / Away Splits (Premium)")
-        st.dataframe(res["splits_home_away"], width="stretch")
+        st.dataframe(res["splits_home_away"], use_container_width=True)
 
     if has_feature(tier, "team", "csv_export"):
         csv = show.to_csv(index=True).encode("utf-8")
@@ -798,7 +1131,47 @@ if mode == "Team Profile":
             mime="text/csv",
         )
 
-else:
+    st.markdown("### Team Over/Underperformance vs Market")
+    min_games_market = st.slider("Minimum games for market table", min_value=1, max_value=17, value=6, step=1)
+    market_perf = load_team_market_outperformance(min_games=min_games_market)
+
+    if market_perf.empty:
+        st.info("No market probability file was found, or the file is missing required columns for team over/underperformance.")
+    else:
+        st.caption("Actual wins vs market expected wins, with rolling last-8 and last-4 windows.")
+        display_cols = [
+            "team",
+            "games",
+            "actual",
+            "expected",
+            "diff",
+            "diff_per_game",
+            "diff_last8",
+            "diff_per_game_last8",
+            "diff_last4",
+            "diff_per_game_last4",
+            "signal_strength",
+            "tier",
+            "regression_trap",
+        ]
+        display_cols = [c for c in display_cols if c in market_perf.columns]
+
+        team_market_perf = market_perf.loc[market_perf["team"] == team, display_cols].copy()
+        if team_market_perf.empty:
+            st.info(f"No market-based team outperformance rows were found for {team} using the current minimum-games filter.")
+        else:
+            st.dataframe(team_market_perf, use_container_width=True, hide_index=True)
+
+        with st.expander("View full league table"):
+            st.dataframe(market_perf[display_cols], use_container_width=True, hide_index=True)
+            st.download_button(
+                "⬇️ Download market outperformance CSV",
+                market_perf.to_csv(index=False).encode("utf-8"),
+                file_name="team_market_outperformance.csv",
+                mime="text/csv",
+            )
+
+elif mode == "Market / Matchup":
     homes = sorted(scores["home"].dropna().astype(str).unique().tolist())
     c1, c2, c3 = st.columns(3)
 
@@ -849,3 +1222,118 @@ else:
 
     if has_feature(tier, "market", "alerts"):
         st.info("Premium: line-move / arb / middle alert configuration would render here.")
+
+
+else:
+    st.subheader("Model Validation & Market-Aware Architecture")
+    st.caption("Surface the nine metrics that prove the model is legitimate, plus the operating philosophy behind Calculated Risk.")
+
+    mv_raw = load_model_validation_dataset()
+    payload = model_validation_payload(mv_raw)
+    metrics = payload.get('metrics', {})
+    work = payload.get('work', pd.DataFrame())
+    settled = payload.get('settled', pd.DataFrame())
+    calibration = payload.get('calibration', pd.DataFrame())
+    roi_bucket = payload.get('roi_bucket', pd.DataFrame())
+    market_stage = payload.get('market_stage', pd.DataFrame())
+    filter_funnel = payload.get('filter_funnel', pd.DataFrame())
+
+    with st.expander("Why this model framework is different", expanded=True):
+        st.markdown(
+            """
+            **The market is the prior. The model is the adjustment.**
+
+            Calculated Risk is built around a market-aware framework:
+            - start with market probability
+            - adjust with predictive features
+            - respect line movement and closing efficiency
+            - only bet when disagreement is meaningful
+
+            That keeps the model focused on **small inefficiencies**, not fantasy edges.
+            """
+        )
+
+    if work.empty:
+        st.info("No usable backtest or market-validation dataset was found in exports/. Add an edges/backtest CSV or a games master with model and market probabilities to unlock this section.")
+    else:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Avg CLV", f"{metrics.get('avg_clv', np.nan)*100:,.2f}%" if pd.notna(metrics.get('avg_clv', np.nan)) else "—")
+        m2.metric("Beat Close Rate", f"{metrics.get('beat_close_rate', np.nan)*100:,.1f}%" if pd.notna(metrics.get('beat_close_rate', np.nan)) else "—")
+        m3.metric("Avg Edge vs Close", f"{metrics.get('avg_edge_vs_close', np.nan)*100:,.2f}%" if pd.notna(metrics.get('avg_edge_vs_close', np.nan)) else "—")
+        m4.metric("Sample Size", f"{metrics.get('sample_size', 0):,}")
+
+        m5, m6, m7, m8 = st.columns(4)
+        m5.metric("Expected ROI", f"{metrics.get('expected_roi', np.nan)*100:,.2f}%" if pd.notna(metrics.get('expected_roi', np.nan)) else "—")
+        m6.metric("Actual ROI", f"{metrics.get('actual_roi', np.nan)*100:,.2f}%" if pd.notna(metrics.get('actual_roi', np.nan)) else "—")
+        m7.metric("Line Move Agreement", f"{metrics.get('line_move_agreement', np.nan)*100:,.1f}%" if pd.notna(metrics.get('line_move_agreement', np.nan)) else "—")
+        m8.metric("Positive-Edge Kept Rate", f"{metrics.get('filter_kept_rate', np.nan)*100:,.1f}%" if pd.notna(metrics.get('filter_kept_rate', np.nan)) else "—")
+
+        st.markdown("### The 9 Metrics That Prove the Model")
+        metric_table = pd.DataFrame([
+            ["1. Closing Line Value (CLV)", metrics.get('avg_clv', np.nan), "Average close probability minus bet probability"],
+            ["2. Beat Close Rate", metrics.get('beat_close_rate', np.nan), "% of bets that improved versus close"],
+            ["3. Edge vs Market (bet)", metrics.get('avg_edge_vs_bet', np.nan), "Model probability minus bet-time market probability"],
+            ["4. Market Efficiency Capture", metrics.get('avg_edge_vs_open', np.nan), "How much early inefficiency the model saw at the open"],
+            ["5. ROI by Probability Bucket", np.nan, "Displayed below by model probability band"],
+            ["6. Sample Size", metrics.get('sample_size', np.nan), "Number of rows available for validation"],
+            ["7. Bet Filtering Logic", metrics.get('filter_kept_rate', np.nan), "Share of rows that survive positive-edge filtering"],
+            ["8. Expected vs Realized ROI", metrics.get('expected_roi', np.nan), "Expected ROI is compared directly to actual ROI"],
+            ["9. Line Movement Agreement", metrics.get('line_move_agreement', np.nan), "Whether the market later moved in the model direction"],
+        ], columns=['Metric', 'Value', 'Meaning'])
+        metric_table['Value'] = metric_table['Value'].apply(lambda x: f"{x*100:,.2f}%" if pd.notna(x) else "See chart/table")
+        st.dataframe(metric_table, use_container_width=True, hide_index=True)
+
+        chart_tabs = st.tabs(["Calibration", "ROI Buckets", "Market Stages", "Filter Funnel", "Raw Validation Data"])
+
+        with chart_tabs[0]:
+            if calibration.empty:
+                st.info("Not enough settled rows with model probability and outcomes to build a calibration chart.")
+            else:
+                try:
+                    import altair as alt
+                    base = alt.Chart(calibration).mark_line(point=True).encode(
+                        x=alt.X('predicted:Q', title='Predicted win probability'),
+                        y=alt.Y('actual:Q', title='Actual win rate'),
+                        tooltip=['bucket_label', 'predicted', 'actual', 'bets']
+                    ).properties(height=320)
+                    diag = alt.Chart(pd.DataFrame({'x':[0,1], 'y':[0,1]})).mark_line(strokeDash=[4,4]).encode(x='x:Q', y='y:Q')
+                    st.altair_chart(base + diag, use_container_width=True)
+                except Exception:
+                    st.line_chart(calibration.set_index('bucket_label')[['predicted', 'actual']])
+                st.dataframe(calibration[['bucket_label', 'bets', 'predicted', 'actual']], use_container_width=True, hide_index=True)
+
+        with chart_tabs[1]:
+            if roi_bucket.empty:
+                st.info("No settled bets were available to build probability-bucket ROI summaries.")
+            else:
+                show_cols = [c for c in ['prob_bucket', 'bets', 'win_rate', 'roi', 'expected_roi', 'avg_edge'] if c in roi_bucket.columns]
+                st.dataframe(roi_bucket[show_cols], use_container_width=True, hide_index=True)
+                chart_df = roi_bucket.copy()
+                if 'prob_bucket' in chart_df.columns:
+                    chart_df['prob_bucket'] = chart_df['prob_bucket'].astype(str)
+                    st.bar_chart(chart_df.set_index('prob_bucket')[['roi', 'expected_roi']])
+
+        with chart_tabs[2]:
+            st.caption("Sharp models should show diminishing edge as the market gets more efficient from open to close.")
+            st.dataframe(market_stage, use_container_width=True, hide_index=True)
+            if not market_stage.empty:
+                st.bar_chart(market_stage.set_index('stage'))
+
+        with chart_tabs[3]:
+            st.dataframe(filter_funnel, use_container_width=True, hide_index=True)
+            if not filter_funnel.empty:
+                st.bar_chart(filter_funnel.set_index('stage'))
+
+        with chart_tabs[4]:
+            preview_cols = [c for c in [
+                'timestamp', 'model_prob', 'bet_prob', 'open_prob', 'mid_prob', 'close_prob',
+                'edge_vs_bet', 'edge_vs_open', 'edge_vs_mid', 'edge_vs_close', 'clv',
+                'profit', 'realized_roi', 'expected_roi', 'line_move_agreement', 'hit'
+            ] if c in work.columns]
+            st.dataframe(work[preview_cols].head(500), use_container_width=True, hide_index=True)
+            st.download_button(
+                '⬇️ Download model validation CSV',
+                work.to_csv(index=False).encode('utf-8'),
+                file_name='model_validation_metrics.csv',
+                mime='text/csv',
+            )
