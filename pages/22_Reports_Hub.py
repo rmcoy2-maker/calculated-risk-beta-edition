@@ -341,28 +341,6 @@ def app() -> None:
             index=EDITION_ORDER.index(suggested_key),
         )
 
-    with col_auto:
-        if st.button("Generate report as of NOW"):
-            script = TOOLS_DIR / "generate_report.py"
-            asof_now = datetime.now().isoformat(timespec="minutes")
-            auto_edition = guess_current_edition(datetime.now())
-
-            run_tool_command(
-                [
-                    sys.executable,
-                    str(script),
-                    "--season",
-                    str(season),
-                    "--week",
-                    str(week),
-                    "--edition",
-                    auto_edition,
-                    "--asof",
-                    asof_now,
-                ],
-                description=f"Generate report for NOW ({auto_edition})",
-            )
-
     if st.button("Generate selected edition"):
         script = TOOLS_DIR / "generate_report.py"
         asof_now = datetime.now().isoformat(timespec="minutes")
@@ -502,7 +480,7 @@ def app() -> None:
                 archive_files.append(path)
 
         if not archive_files:
-            st.caption("No matching archive PDFs available to download.")work
+            st.caption("No matching archive PDFs available to download.")
         else:
             for pdf in archive_files[:50]:
                 info = parse_report_filename(pdf)
