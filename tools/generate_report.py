@@ -78,7 +78,61 @@ def resolve_paths(
             root / "tools" / "exports" / "historical_odds" / "nfl_historical_odds_2020_2025_master.csv",
         ]
     )
+def resolve_paths(
+    season: int,
+    week: int,
+    edition: str,
+    reports_dir_arg: str | None = None,
+) -> ReportPaths:
+    root = _find_root()
+    exports = root / "exports"
 
+    if reports_dir_arg:
+        reports = Path(reports_dir_arg)
+        if not reports.is_absolute():
+            reports = root / reports
+    else:
+        reports = exports / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+
+    historical_odds = _existing_first(
+        [
+            exports / "historical_odds" / "nfl_historical_odds_2020_2025_master.parquet",
+            exports / "historical_odds" / "nfl_historical_odds_2020_2025_master.csv",
+            root / "tools" / "exports" / "historical_odds" / "nfl_historical_odds_2020_2025_master.parquet",
+            root / "tools" / "exports" / "historical_odds" / "nfl_historical_odds_2020_2025_master.csv",
+        ]
+    )
+
+    merged_odds = _existing_first(
+        [
+            exports / "nfl_odds_full_merged.parquet",
+            exports / "nfl_odds_full_merged.csv",
+            exports / "historical_odds" / "nfl_odds_full_merged.parquet",
+            exports / "historical_odds" / "nfl_odds_full_merged.csv",
+            root / "tools" / "exports" / "historical_odds" / "nfl_odds_full_merged.parquet",
+            root / "tools" / "exports" / "historical_odds" / "nfl_odds_full_merged.csv",
+        ]
+    )
+
+    open_mid_close = _existing_first(
+        [
+            exports / "historical_odds" / "nfl_open_mid_close_odds.parquet",
+            exports / "historical_odds" / "nfl_open_mid_close_odds.csv",
+            root / "tools" / "exports" / "historical_odds" / "nfl_open_mid_close_odds.parquet",
+            root / "tools" / "exports" / "historical_odds" / "nfl_open_mid_close_odds.csv",
+        ]
+    )
+
+    return ReportPaths(
+        exports_dir=exports,
+        reports_dir=reports,
+        historical_odds_path=historical_odds,
+        merged_odds_path=merged_odds,
+        open_mid_close_path=open_mid_close,
+        json_path=reports / f"{season}_week{week}_{edition}_3v1.json",
+        pdf_path=reports / f"{season}_week{week}_{edition}_3v1.pdf",
+    )
     merged_odds = _existing_first(
         [
             exports / "nfl_odds_full_merged.parquet",
