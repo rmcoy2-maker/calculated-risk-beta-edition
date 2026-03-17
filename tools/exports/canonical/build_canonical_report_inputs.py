@@ -20,7 +20,7 @@ def read_csv_safe(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
     try:
-        return pd.read_csv(path)
+        return pd.read_csv(path, low_memory=False)
     except Exception as e:
         print(f"[WARN] Failed reading {path}: {e}")
         return pd.DataFrame()
@@ -66,15 +66,28 @@ def _filter_season_week(df: pd.DataFrame, season: int, week: int) -> pd.DataFram
 
     out = df.copy()
 
-    if "season" in out.columns:
-        out["season"] = pd.to_numeric(out["season"], errors="coerce")
-        out = out[out["season"] == season]
+    season_col = None
+    week_col = None
 
-    if "week" in out.columns:
-        out["week"] = pd.to_numeric(out["week"], errors="coerce")
-        out = out[out["week"] == week]
+    for c in ["season", "Season", "YEAR", "year"]:
+        if c in out.columns:
+            season_col = c
+            break
 
-    return out
+    for c in ["week", "Week", "WEEK", "Week_gm", "week_gm"]:
+        if c in out.columns:
+            week_col = c
+            break
+
+    if season_col is not None:
+        season_vals = out[season_col].astype(str).str.extract(r"(\d{4})", expand=False)
+        out = out[pd.to_numeric(season_vals, errors="coerce") == season]
+
+    if week_col is not None:
+        week_vals = out[week_col].astype(str).str.extract(r"(\d+)", expand=False)
+        out = out[pd.to_numeric(week_vals, errors="coerce") == week]
+
+    return out.reset_index(drop=True)
 
 
 def build_games(season: int, week: int) -> pd.DataFrame:
@@ -98,35 +111,63 @@ def build_games(season: int, week: int) -> pd.DataFrame:
 
 
 def build_edges(season: int, week: int) -> pd.DataFrame:
-    df = read_csv_safe(EDGES_MASTER)
+    path = EXPORTS / "fort_knox_market_joined_moneyline_scored_all_seasons.csv"
+
+    if not path.exists():
+        print("[WARN] Missing Fort Knox scored file")
+        return pd.DataFrame()
+
+    df = pd.read_csv(path, low_memory=False)
+
+    # --- normalize columns ---
+    cols = {c.lower(): c for c in df.columns}
+
+    # find season/week columns
+    season_col = next((c for c in df.columns if c.lower() in ["season", "year"]), None)
+    week_col = next((c for c in df.columns if c.lower() in ["week"]), None)
+
+    if season_col:
+        df = df[pd.to_numeric(df[season_col], errors="coerce") == season]
+
+    if week_col:
+        df = df[pd.to_numeric(df[week_col], errors="coerce") == week]
 
     if df.empty:
+        print("[WARN] No rows after filtering Fort Knox file")
         return df
 
-    df = _filter_season_week(df, season, week)
-
+    # --- standardize names ---
     rename = {
-        "away": "away_team",
         "home": "home_team",
-        "AwayTeam": "away_team",
+        "away": "away_team",
         "HomeTeam": "home_team",
+        "AwayTeam": "away_team",
+        "odds": "price",
         "edge": "edge_score",
-        "ev": "edge_score",
-        "conf": "confidence",
-        "bet": "label",
-        "play": "label",
     }
     df = df.rename(columns=rename)
 
-    if "confidence" not in df.columns:
-        df["confidence"] = 50
-
-    if "edge_score" not in df.columns:
-        df["edge_score"] = 0
-
+    # --- ensure matchup ---
     df = _ensure_matchup(df)
-    return df
 
+    # --- label ---
+    if "label" not in df.columns:
+        if "market" in df.columns and "side" in df.columns:
+            df["label"] = df["market"].astype(str) + " " + df["side"].astype(str)
+        else:
+            df["label"] = "Moneyline"
+
+    # --- confidence ---
+    if "edge_score" not in df.columns:
+        print("[WARN] No edge_score column found")
+        return pd.DataFrame()
+
+    df["edge_score"] = pd.to_numeric(df["edge_score"], errors="coerce").fillna(0)
+
+    if "confidence" not in df.columns:
+        df["confidence"] = (50 + df["edge_score"].abs() * 100).clip(upper=99)
+
+    return df
 
 def build_markets(season: int, week: int) -> pd.DataFrame:
     df = read_csv_safe(LINES_MASTER)

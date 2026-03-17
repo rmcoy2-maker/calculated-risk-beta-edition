@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +14,7 @@ import pandas as pd
 try:
     from reportlab.lib.pagesizes import letter
     from reportlab.pdfgen import canvas
+
     HAVE_REPORTLAB = True
 except Exception:
     HAVE_REPORTLAB = False
@@ -46,6 +46,7 @@ class ReportPaths:
 def _find_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
+
 def _existing_first(candidates: list[Path]) -> Path:
     for p in candidates:
         if p.exists():
@@ -59,33 +60,6 @@ def resolve_paths(
     edition: str,
     reports_dir_arg: str | None = None,
 ) -> ReportPaths:
-
-    root = _find_root()
-    exports = root / "exports"
-
-    if reports_dir_arg:
-        reports = Path(reports_dir_arg)
-        if not reports.is_absolute():
-            reports = root / reports
-    else:
-        reports = exports / "reports"
-
-    reports.mkdir(parents=True, exist_ok=True)
-
-    historical_odds = _existing_first(
-        [
-            exports / "historical_odds" / "nfl_historical_odds_2020_2025_master.parquet",
-            exports / "historical_odds" / "nfl_historical_odds_2020_2025_master.csv",
-            root / "tools" / "exports" / "historical_odds" / "nfl_historical_odds_2020_2025_master.parquet",
-            root / "tools" / "exports" / "historical_odds" / "nfl_historical_odds_2020_2025_master.csv",
-        ]
-    )
-def resolve_paths(
-    season: int,
-    week: int,
-    edition: str,
-    reports_dir_arg: str | None = None,
-) -> ReportPaths:
     root = _find_root()
     exports = root / "exports"
 
@@ -106,35 +80,6 @@ def resolve_paths(
         ]
     )
 
-    merged_odds = _existing_first(
-        [
-            exports / "nfl_odds_full_merged.parquet",
-            exports / "nfl_odds_full_merged.csv",
-            exports / "historical_odds" / "nfl_odds_full_merged.parquet",
-            exports / "historical_odds" / "nfl_odds_full_merged.csv",
-            root / "tools" / "exports" / "historical_odds" / "nfl_odds_full_merged.parquet",
-            root / "tools" / "exports" / "historical_odds" / "nfl_odds_full_merged.csv",
-        ]
-    )
-
-    open_mid_close = _existing_first(
-        [
-            exports / "historical_odds" / "nfl_open_mid_close_odds.parquet",
-            exports / "historical_odds" / "nfl_open_mid_close_odds.csv",
-            root / "tools" / "exports" / "historical_odds" / "nfl_open_mid_close_odds.parquet",
-            root / "tools" / "exports" / "historical_odds" / "nfl_open_mid_close_odds.csv",
-        ]
-    )
-
-    return ReportPaths(
-        exports_dir=exports,
-        reports_dir=reports,
-        historical_odds_path=historical_odds,
-        merged_odds_path=merged_odds,
-        open_mid_close_path=open_mid_close,
-        json_path=reports / f"{season}_week{week}_{edition}_3v1.json",
-        pdf_path=reports / f"{season}_week{week}_{edition}_3v1.pdf",
-    )
     merged_odds = _existing_first(
         [
             exports / "nfl_odds_full_merged.parquet",
@@ -177,6 +122,25 @@ def load_table(path: Path) -> pd.DataFrame:
         return pd.read_csv(path, low_memory=False, encoding="utf-8-sig")
     except Exception:
         return pd.read_csv(path, low_memory=False)
+
+
+def load_canonical_csv(paths: ReportPaths, name: str, season: int, week: int) -> pd.DataFrame:
+    candidates = [
+        _find_root() / "tools" / "exports" / "canonical" / f"{name}_{season}_w{week}.csv",
+        paths.exports_dir / "canonical" / f"{name}_{season}_w{week}.csv",
+    ]
+
+    for path in candidates:
+        if path.exists():
+            try:
+                df = pd.read_csv(path, low_memory=False)
+                if not df.empty:
+                    print(f"[INFO] loaded canonical {name} from: {path}")
+                    return df
+            except pd.errors.EmptyDataError:
+                pass
+
+    return pd.DataFrame()
 
 
 def lc_map(df: pd.DataFrame) -> dict[str, str]:
@@ -334,7 +298,16 @@ def build_game_lookup(games: pd.DataFrame) -> pd.DataFrame:
 
 def normalize_market_name(x: Any) -> str:
     s = str(x or "").strip().lower()
-    mapping = {"h2h": "moneyline", "ml": "moneyline", "money line": "moneyline", "spreads": "spread", "ats": "spread", "totals": "total", "game total": "total", "team totals": "team_total"}
+    mapping = {
+        "h2h": "moneyline",
+        "ml": "moneyline",
+        "money line": "moneyline",
+        "spreads": "spread",
+        "ats": "spread",
+        "totals": "total",
+        "game total": "total",
+        "team totals": "team_total",
+    }
     return mapping.get(s, s)
 
 
@@ -344,37 +317,67 @@ def format_play_label(row: pd.Series) -> str:
     line = row.get("line")
     total = row.get("total_line", row.get("line"))
     direction = str(row.get("direction", row.get("bet_direction", ""))).strip().title()
+
+    raw_label = str(row.get("label", "")).strip()
+    if raw_label and raw_label.lower() not in {"unknown play", "moneyline"}:
+        return raw_label
+
     if market in {"moneyline", "ml", "h2h"}:
-        return f"{side} ML".strip()
+        return f"{side} ML".strip() if side else "Moneyline"
     if market in {"spread", "spreads", "ats"}:
         return f"{side} {fmt_line(line)}".strip() if side else f"Spread {fmt_line(line)}".strip()
     if market in {"total", "totals", "game_total"}:
         return f"{direction or 'Over'} {fmt_total(total)}".strip()
-    return side or str(row.get("selection", row.get("label", "Unknown play")))
+    return side or raw_label or "Play"
 
 
 def enrich_edges(edges: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
     if edges.empty:
         return edges.copy()
+
     out = edges.copy()
     out["game_id"] = first_existing(out, ["game_id", "event_id", "id", "gid", "GameID"], default="").astype(str)
     out["market_norm"] = first_existing(out, ["market_norm", "market_type", "market"]).map(normalize_market_name)
     out["line"] = to_num(first_existing(out, ["line", "spread_line", "points", "handicap"]))
     out["total_line"] = to_num(first_existing(out, ["total_line", "points_line", "line"]))
-    out["side_team"] = first_existing(out, ["team", "side_team", "selection_team", "pick_team", "side", "selection"]).map(clean_team_name)
+    out["side_team"] = first_existing(
+        out,
+        ["team", "side_team", "selection_team", "pick_team", "side", "selection"],
+    ).map(clean_team_name)
+
     out["confidence"] = to_num(first_existing(out, ["confidence", "confidence_score", "conf", "grade_confidence"]))
-    out["score"] = to_num(first_existing(out, ["score", "edge_score", "fort_knox_score", "fk_score", "rank_score", "fort_knox", "composite_score"]))
+    out["score"] = to_num(
+        first_existing(
+            out,
+            ["score", "edge_score", "fort_knox_score", "fk_score", "rank_score", "fort_knox", "composite_score"],
+        )
+    )
     out["score"] = out["score"].fillna(out["confidence"])
+
     out["p_win"] = to_num(first_existing(out, ["p_win", "win_prob", "prob", "model_prob"]))
     out["market_odds"] = to_num(first_existing(out, ["odds", "price", "american_odds"]))
-    out["implied_prob"] = out["market_odds"].map(implied_prob_from_american)
+
+    if "implied_prob" in out.columns:
+        out["implied_prob"] = to_num(out["implied_prob"])
+    else:
+        out["implied_prob"] = out["market_odds"].map(implied_prob_from_american)
+
     out["edge_prob"] = out["p_win"] - out["implied_prob"]
+
     lookup = build_game_lookup(games)
     if not lookup.empty:
         out = out.merge(lookup, on="game_id", how="left", suffixes=("", "_lk"))
-    out["game_label"] = out.get("game_label", first_existing(out, ["matchup", "event_name"], default="").astype(str))
+
+    out["game_label"] = out.get(
+        "game_label",
+        first_existing(out, ["matchup", "event_name"], default="").astype(str),
+    )
     out["play_label"] = out.apply(format_play_label, axis=1)
-    out["board_label"] = np.where(out["game_label"].astype(str).str.len() > 0, out["game_label"].astype(str) + " | " + out["play_label"].astype(str), out["play_label"].astype(str))
+    out["board_label"] = np.where(
+        out["game_label"].astype(str).str.len() > 0,
+        out["game_label"].astype(str) + " | " + out["play_label"].astype(str),
+        out["play_label"].astype(str),
+    )
     return out
 
 
@@ -385,15 +388,33 @@ def enrich_games(games: pd.DataFrame, markets: pd.DataFrame, scores: pd.DataFram
     g["game_id"] = first_existing(g, ["game_id", "event_id", "id", "gid", "GameID"], default="").astype(str)
     g["home_team"] = first_existing(g, ["home_team", "home", "HomeTeam", "team_home"]).map(clean_team_name)
     g["away_team"] = first_existing(g, ["away_team", "away", "AwayTeam", "team_away"]).map(clean_team_name)
-    g["game_label"] = np.where(g["away_team"].astype(str).str.len() > 0, g["away_team"] + " @ " + g["home_team"], first_existing(g, ["game_label", "matchup"], default="").astype(str))
+    g["game_label"] = np.where(
+        g["away_team"].astype(str).str.len() > 0,
+        g["away_team"] + " @ " + g["home_team"],
+        first_existing(g, ["game_label", "matchup"], default="").astype(str),
+    )
     g["market_spread_raw"] = np.nan
     g["market_total"] = np.nan
 
     if not markets.empty:
         m = markets.copy()
         m["game_id"] = first_existing(m, ["game_id", "event_id", "id", "gid", "GameID"], default="").astype(str)
-        spread_df = pd.DataFrame({"game_id": m["game_id"], "market_spread_raw": to_num(first_existing(m, ["market_spread", "spread", "spread_home", "closing_spread_home"]))}).dropna(subset=["market_spread_raw"]).drop_duplicates("game_id")
-        total_df = pd.DataFrame({"game_id": m["game_id"], "market_total": to_num(first_existing(m, ["market_total", "total", "total_line", "closing_total"]))}).dropna(subset=["market_total"]).drop_duplicates("game_id")
+        spread_df = pd.DataFrame(
+            {
+                "game_id": m["game_id"],
+                "market_spread_raw": to_num(
+                    first_existing(m, ["market_spread", "spread", "spread_home", "closing_spread_home"])
+                ),
+            }
+        ).dropna(subset=["market_spread_raw"]).drop_duplicates("game_id")
+        total_df = pd.DataFrame(
+            {
+                "game_id": m["game_id"],
+                "market_total": to_num(
+                    first_existing(m, ["market_total", "total", "total_line", "closing_total"])
+                ),
+            }
+        ).dropna(subset=["market_total"]).drop_duplicates("game_id")
         if not spread_df.empty:
             g = g.merge(spread_df, on="game_id", how="left", suffixes=("", "_m"))
             if "market_spread_raw_m" in g.columns:
@@ -410,7 +431,17 @@ def enrich_games(games: pd.DataFrame, markets: pd.DataFrame, scores: pd.DataFram
     if not scores.empty:
         s = scores.copy()
         s["game_id"] = first_existing(s, ["game_id", "event_id", "id", "gid", "GameID"], default="").astype(str)
-        mean_df = pd.DataFrame({"game_id": s["game_id"], "home_score_mean": to_num(first_existing(s, ["home_score_mean", "home_points_mean", "home_proj_score", "proj_home_score"])), "away_score_mean": to_num(first_existing(s, ["away_score_mean", "away_points_mean", "away_proj_score", "proj_away_score"]))}).drop_duplicates("game_id")
+        mean_df = pd.DataFrame(
+            {
+                "game_id": s["game_id"],
+                "home_score_mean": to_num(
+                    first_existing(s, ["home_score_mean", "home_points_mean", "home_proj_score", "proj_home_score"])
+                ),
+                "away_score_mean": to_num(
+                    first_existing(s, ["away_score_mean", "away_points_mean", "away_proj_score", "proj_away_score"])
+                ),
+            }
+        ).drop_duplicates("game_id")
         g = g.merge(mean_df, on="game_id", how="left", suffixes=("", "_s"))
         for col in ["home_score_mean", "away_score_mean"]:
             alt = f"{col}_s"
@@ -418,8 +449,20 @@ def enrich_games(games: pd.DataFrame, markets: pd.DataFrame, scores: pd.DataFram
                 g[col] = g[col].fillna(g[alt])
                 g = g.drop(columns=[alt])
 
-    power_diff = to_num(first_existing(g, ["power_diff", "team_power_diff", "elo_diff", "rating_diff", "home_power_minus_away_power"]), default=0.0)
-    recent_form_diff = to_num(first_existing(g, ["recent_form_diff", "form_diff", "last5_diff", "rolling_form_diff", "home_form_minus_away_form"]), default=0.0)
+    power_diff = to_num(
+        first_existing(
+            g,
+            ["power_diff", "team_power_diff", "elo_diff", "rating_diff", "home_power_minus_away_power"],
+        ),
+        default=0.0,
+    )
+    recent_form_diff = to_num(
+        first_existing(
+            g,
+            ["recent_form_diff", "form_diff", "last5_diff", "rolling_form_diff", "home_form_minus_away_form"],
+        ),
+        default=0.0,
+    )
     qb_diff = to_num(first_existing(g, ["qb_diff", "qb_edge", "home_qb_minus_away_qb"]), default=0.0)
     pace_diff = to_num(first_existing(g, ["pace_diff", "plays_diff", "tempo_diff"]), default=0.0)
     home_field_pts = to_num(first_existing(g, ["home_field_pts", "hfa_pts", "home_field_advantage"]), default=1.75)
@@ -427,11 +470,23 @@ def enrich_games(games: pd.DataFrame, markets: pd.DataFrame, scores: pd.DataFram
     market_spread = to_num(g["market_spread_raw"])
     market_total = to_num(g["market_total"])
 
-    raw_margin = 0.70 * market_spread.fillna(0.0) + 0.45 * power_diff + 0.30 * recent_form_diff + 0.20 * qb_diff + 0.08 * pace_diff + home_field_pts
+    raw_margin = (
+        0.70 * market_spread.fillna(0.0)
+        + 0.45 * power_diff
+        + 0.30 * recent_form_diff
+        + 0.20 * qb_diff
+        + 0.08 * pace_diff
+        + home_field_pts
+    )
     shrunk_margin = np.where(market_spread.notna(), 0.75 * market_spread + 0.25 * raw_margin, raw_margin)
     g["shrunk_proj_margin"] = pd.Series(shrunk_margin, index=g.index).clip(-17.0, 17.0)
+
     raw_total = market_total.fillna(41.5) + 0.60 * pace_diff + 0.12 * recent_form_diff.abs()
-    g["shrunk_proj_total"] = pd.Series(np.where(market_total.notna(), 0.78 * market_total + 0.22 * raw_total, raw_total), index=g.index).clip(30.0, 62.0)
+    g["shrunk_proj_total"] = pd.Series(
+        np.where(market_total.notna(), 0.78 * market_total + 0.22 * raw_total, raw_total),
+        index=g.index,
+    ).clip(30.0, 62.0)
+
     g["proj_home_points"] = ((g["shrunk_proj_total"] + g["shrunk_proj_margin"]) / 2.0).clip(lower=10.0).round(1)
     g["proj_away_points"] = ((g["shrunk_proj_total"] - g["shrunk_proj_margin"]) / 2.0).clip(lower=10.0).round(1)
     return g
@@ -460,6 +515,13 @@ def _safe_float(x: Any) -> float:
         return float("nan")
 
 
+def _fmt_edge_points(x: Any) -> str:
+    val = _safe_float(x)
+    if pd.isna(val):
+        return ""
+    return f"{val * 100:+.1f}"
+
+
 def build_game_script(game_row: pd.Series, edges_for_game: pd.DataFrame) -> str:
     home = str(game_row.get("home_team", "Home"))
     away = str(game_row.get("away_team", "Away"))
@@ -467,20 +529,39 @@ def build_game_script(game_row: pd.Series, edges_for_game: pd.DataFrame) -> str:
     proj_away = _safe_float(game_row.get("proj_away_points", np.nan))
     proj_margin = _safe_float(game_row.get("shrunk_proj_margin", np.nan))
     proj_total = _safe_float(game_row.get("shrunk_proj_total", np.nan))
+
     intro = f"{away} @ {home}."
     projection_text = ""
     if pd.notna(proj_home) and pd.notna(proj_away):
-        projection_text = f"Model projection: {home} {proj_home:.1f}, {away} {proj_away:.1f}. Projected margin: {proj_margin:+.1f}. Projected total: {proj_total:.1f}."
+        projection_text = (
+            f"Model projection: {home} {proj_home:.1f}, {away} {proj_away:.1f}. "
+            f"Projected margin: {proj_margin:+.1f}. Projected total: {proj_total:.1f}."
+        )
+
     if edges_for_game.empty:
         reason = "No ranked edge survived filtering for this matchup."
     else:
         sort_cols = [c for c in ["score", "confidence"] if c in edges_for_game.columns]
         top = edges_for_game.sort_values(sort_cols, ascending=False).iloc[0] if sort_cols else edges_for_game.iloc[0]
+
         play_label = str(top.get("play_label", top.get("board_label", "Top play"))).strip()
         conf = _safe_float(top.get("confidence", np.nan))
         score = _safe_float(top.get("score", np.nan))
         edge_prob = _safe_float(top.get("edge_prob", np.nan))
-        reason = f"Simulation Value Play: {play_label}. Confidence {conf:.0f}; Fort Knox Score {score:.2f}. Model edge vs implied price: {edge_prob * 100:+.1f} pts."
+
+        if pd.notna(edge_prob):
+            support_text = f"Model edge vs implied price: {_fmt_edge_points(edge_prob)} percentage points."
+        elif pd.notna(score):
+            support_text = f"Estimated edge score: {score:.2f}."
+        else:
+            support_text = "Positive support is present, but the underlying pricing detail is limited."
+
+        reason = (
+            f"Simulation Value Play: {play_label}. "
+            f"Confidence {conf:.0f}; Fort Knox Score {score:.2f}. "
+            f"{support_text}"
+        )
+
     return " ".join([p for p in [intro, projection_text, reason] if p]).strip()
 
 
@@ -489,8 +570,15 @@ def build_edge_summary(r: pd.Series) -> str:
     conf = float(r.get("confidence", 0.0) or 0.0)
     score = float(r.get("score", 0.0) or 0.0)
     edge_prob = r.get("edge_prob", np.nan)
-    prob_phrase = f"Model edge vs implied price: {float(edge_prob) * 100:+.1f} pts." if pd.notna(edge_prob) else "Model support is positive but incomplete on price-vs-prob columns."
-    return f"{label}. Confidence {conf:.0f} — {confidence_band(conf)}. {prob_phrase} Fort Knox Score {score:.2f}."
+
+    if pd.notna(edge_prob):
+        support_text = f"Model edge vs implied price: {_fmt_edge_points(edge_prob)} percentage points."
+    elif pd.notna(score):
+        support_text = f"Estimated edge score: {score:.2f}."
+    else:
+        support_text = "Positive support is present, but pricing detail is limited."
+
+    return f"{label}. Confidence {conf:.0f} — {confidence_band(conf)}. {support_text} Fort Knox Score {score:.2f}."
 
 
 def section_top_edges(edges: pd.DataFrame, limit: int = 5) -> list[dict[str, Any]]:
@@ -500,7 +588,16 @@ def section_top_edges(edges: pd.DataFrame, limit: int = 5) -> list[dict[str, Any
     tmp = edges.sort_values(sort_cols, ascending=False).head(limit).copy() if sort_cols else edges.head(limit).copy()
     rows = []
     for _, r in tmp.iterrows():
-        rows.append({"rank": len(rows) + 1, "board_label": str(r.get("board_label", "")), "confidence": round(float(r.get("confidence", 0.0)), 2), "band": confidence_band(float(r.get("confidence", 0.0))), "score": round(float(r.get("score", 0.0)), 2), "summary": build_edge_summary(r)})
+        rows.append(
+            {
+                "rank": len(rows) + 1,
+                "board_label": str(r.get("board_label", "")),
+                "confidence": round(float(r.get("confidence", 0.0)), 2),
+                "band": confidence_band(float(r.get("confidence", 0.0))),
+                "score": round(float(r.get("score", 0.0)), 2),
+                "summary": build_edge_summary(r),
+            }
+        )
     return rows
 
 
@@ -509,21 +606,39 @@ def section_heatmap(edges: pd.DataFrame, limit: int = 12) -> list[dict[str, Any]
         return []
     sort_cols = [c for c in ["score", "confidence"] if c in edges.columns]
     tmp = edges.sort_values(sort_cols, ascending=False).head(limit).copy() if sort_cols else edges.head(limit).copy()
-    return [{"board_label": str(r.get("board_label", "")), "band": confidence_band(float(r.get("confidence", 0.0))), "score": round(float(r.get("score", 0.0)), 2)} for _, r in tmp.iterrows()]
+    return [
+        {
+            "board_label": str(r.get("board_label", "")),
+            "band": confidence_band(float(r.get("confidence", 0.0))),
+            "score": round(float(r.get("score", 0.0)), 2),
+        }
+        for _, r in tmp.iterrows()
+    ]
 
 
-def section_scripts(games: pd.DataFrame, edges: pd.DataFrame, proj_master: pd.DataFrame | None = None) -> list[dict[str, Any]]:
+def section_scripts(
+    games: pd.DataFrame,
+    edges: pd.DataFrame,
+    proj_master: pd.DataFrame | None = None,
+) -> list[dict[str, Any]]:
     if games.empty:
         return []
     rows = []
     edge_map = {str(gid): sub.copy() for gid, sub in edges.groupby("game_id")} if (not edges.empty and "game_id" in edges.columns) else {}
-    proj_map = {str(r.get("game_id", "")): r for _, r in proj_master.iterrows()} if (proj_master is not None and not proj_master.empty and "game_id" in proj_master.columns) else {}
+    proj_map = {
+        str(r.get("game_id", "")): r for _, r in proj_master.iterrows()
+    } if (proj_master is not None and not proj_master.empty and "game_id" in proj_master.columns) else {}
     sort_key = "game_label" if "game_label" in games.columns else "game_id"
     for _, g in games.sort_values(sort_key).iterrows():
         gid = str(g.get("game_id", ""))
         e = edge_map.get(gid, pd.DataFrame())
         src = proj_map.get(gid, g)
-        rows.append({"game_label": str(src.get("matchup", g.get("game_label", ""))).strip(), "script": build_game_script(src, e)})
+        rows.append(
+            {
+                "game_label": str(src.get("matchup", g.get("game_label", ""))).strip(),
+                "script": build_game_script(src, e),
+            }
+        )
     return rows
 
 
@@ -623,10 +738,16 @@ def render_pdf(path: Path, payload: dict[str, Any]) -> None:
 
     for idx, line in enumerate(payload["title"].split("\n")):
         draw_line(line, size=13 if idx == 0 else 14, bold=True, gap=16)
+
     for row in payload["sections"]["top_edges"]:
-        draw_line(f"{row['rank']}) {row['board_label']} | Confidence: {row['confidence']} | Score: {row['score']}", size=10, gap=13)
+        draw_line(
+            f"{row['rank']}) {row['board_label']} | Confidence: {row['confidence']} | Score: {row['score']}",
+            size=10,
+            gap=13,
+        )
         for chunk in wrap_text(row["summary"], max_chars=100):
             draw_line(chunk, size=10, gap=12)
+
     c.save()
 
 
@@ -652,14 +773,16 @@ def main() -> None:
 
     paths = resolve_paths(args.season, args.week, args.edition, args.reports_dir)
     proj_master = load_game_projection_master(paths, args.season, args.week)
+
     historical = load_table(paths.historical_odds_path)
     merged = load_table(paths.merged_odds_path)
     open_mid_close = load_table(paths.open_mid_close_path)
-    games = filter_season_week(merged, args.season, args.week)
-    edges = filter_season_week(merged, args.season, args.week)
-    markets = filter_season_week(open_mid_close, args.season, args.week)
-    scores = filter_season_week(historical, args.season, args.week)
-    parlays = pd.DataFrame()
+
+    games = load_canonical_csv(paths, "cr_games", args.season, args.week)
+    edges = load_canonical_csv(paths, "cr_edges", args.season, args.week)
+    markets = load_canonical_csv(paths, "cr_markets", args.season, args.week)
+    scores = load_canonical_csv(paths, "cr_scores", args.season, args.week)
+    parlays = load_canonical_csv(paths, "cr_parlay_scores", args.season, args.week)
 
     print(f"[INFO] root={_find_root()}")
     print(f"[INFO] merged source: {paths.merged_odds_path}")
@@ -669,19 +792,36 @@ def main() -> None:
     print(f"[INFO] merged rows: {len(merged):,}")
     print(f"[INFO] historical rows: {len(historical):,}")
     print(f"[INFO] open_mid_close rows: {len(open_mid_close):,}")
-    print(f"[INFO] games rows after filter: {len(games):,}")
-    print(f"[INFO] edges rows after filter: {len(edges):,}")
-    print(f"[INFO] markets rows after filter: {len(markets):,}")
-    print(f"[INFO] scores rows after filter: {len(scores):,}")
+    print(f"[INFO] games rows after canonical load: {len(games):,}")
+    print(f"[INFO] edges rows after canonical load: {len(edges):,}")
+    print(f"[INFO] markets rows after canonical load: {len(markets):,}")
+    print(f"[INFO] scores rows after canonical load: {len(scores):,}")
+    print(f"[INFO] parlays rows after canonical load: {len(parlays):,}")
+
     if games.empty:
-        raise SystemExit(f"No rows found for season={args.season}, week={args.week} in {paths.merged_odds_path}")
+        raise SystemExit(
+            f"No canonical game rows found for season={args.season}, week={args.week} "
+            f"in {paths.exports_dir / 'canonical'}"
+        )
 
     edges2 = enrich_edges(edges, games)
     games2 = enrich_games(games, markets, scores)
     as_of = args.asof or detect_as_of(games2, edges2)
-    payload = build_report_payload(args.season, args.week, args.edition, as_of, edges2, games2, parlays, proj_master=proj_master)
+
+    payload = build_report_payload(
+        args.season,
+        args.week,
+        args.edition,
+        as_of,
+        edges2,
+        games2,
+        parlays,
+        proj_master=proj_master,
+    )
+
     write_json(paths.json_path, payload)
     print(f"[OK] wrote JSON: {paths.json_path}")
+
     try:
         render_pdf(paths.pdf_path, payload)
         print(f"[OK] wrote PDF: {paths.pdf_path}")
