@@ -66,12 +66,10 @@ def _find_root() -> Path:
     return Path.cwd()
 
 
-def resolve_paths(
-    season: int, week: int, edition: str, reports_dir_arg: str | None = None
-) -> ReportPaths:
+def resolve_paths(season: int, week: int, edition: str, reports_dir_arg: str | None = None) -> ReportPaths:
     root = _find_root()
     exports = root / "exports"
-    historical_odds = exports / "historical_odds"
+    input_base = _pick_input_base(exports)
 
     if reports_dir_arg:
         reports = Path(reports_dir_arg)
@@ -79,7 +77,7 @@ def resolve_paths(
             reports = root / reports
     else:
         reports = exports / "reports"
-        reports.mkdir(parents=True, exist_ok=True)
+    reports.mkdir(parents=True, exist_ok=True)
 
     return ReportPaths(
         exports_dir=input_base,
