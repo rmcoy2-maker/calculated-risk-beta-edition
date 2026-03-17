@@ -1,11 +1,11 @@
-from __future__ import annotations
-
-import argparse
 from pathlib import Path
+import sys
 
-import pandas as pd
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(ROOT / "tools"))
 
-from generate_report_rebuild_full import resolve_paths, load_csv, enrich_edges, enrich_games, enrich_parlays
+from generate_report import resolve_paths, load_table, enrich_edges, enrich_games, enrich_parlays
 
 
 def main() -> None:
