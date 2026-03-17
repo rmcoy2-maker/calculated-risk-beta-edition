@@ -59,6 +59,7 @@ def resolve_paths(
     edition: str,
     reports_dir_arg: str | None = None,
 ) -> ReportPaths:
+
     root = _find_root()
     exports = root / "exports"
 
@@ -68,6 +69,7 @@ def resolve_paths(
             reports = root / reports
     else:
         reports = exports / "reports"
+
     reports.mkdir(parents=True, exist_ok=True)
 
     historical_odds = _existing_first(
