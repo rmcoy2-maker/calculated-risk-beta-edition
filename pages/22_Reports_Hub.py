@@ -26,13 +26,11 @@ TOOLS_DIR = ROOT / "tools"
 EXPORTS_DIR = ROOT / "exports"
 REPORTS_DIR = EXPORTS_DIR / "reports"
 
-
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 if TOOLS_DIR.exists() and str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
-
 
 for p in (EXPORTS_DIR, REPORTS_DIR):
     p.mkdir(parents=True, exist_ok=True)
@@ -44,10 +42,8 @@ st.set_page_config(
     layout="wide",
 )
 
-
 DEFAULT_SEASON = 2025
 DEFAULT_WEEK = 1
-
 
 EDITION_ORDER = [
     "tnf",
@@ -57,7 +53,6 @@ EDITION_ORDER = [
     "monday",
     "tuesday",
 ]
-
 
 EDITION_META: Dict[str, Dict[str, str]] = {
     "tnf": {
@@ -105,23 +100,18 @@ def guess_current_edition(now: datetime | None = None) -> str:
 
     if dow == 3:
         return "tnf"
-
     if dow == 4:
         return "sunday_afternoon"
-
     if dow == 5:
         return "sunday_morning"
-
     if dow == 6:
         if hour < 12:
             return "sunday_morning"
         if hour < 17:
             return "sunday_afternoon"
         return "snf"
-
     if dow == 0:
         return "monday"
-
     if dow == 1:
         return "tuesday"
 
@@ -205,7 +195,8 @@ def list_report_files(season: int, week: int) -> list[Path]:
     ]
 
     files = [
-        p for p in REPORTS_DIR.glob("*.pdf")
+        p
+        for p in REPORTS_DIR.glob("*.pdf")
         if any(p.name.startswith(prefix) for prefix in prefixes)
     ]
 
@@ -274,7 +265,9 @@ def build_archive_table() -> pd.DataFrame:
         )
 
     if not rows:
-        return pd.DataFrame(columns=["Season", "Week", "Edition", "Edition Name", "File", "Modified"])
+        return pd.DataFrame(
+            columns=["Season", "Week", "Edition", "Edition Name", "File", "Modified"]
+        )
 
     return pd.DataFrame(rows)
 
@@ -288,10 +281,13 @@ def app() -> None:
 
     archive_df = build_archive_table()
 
-    season_values = sorted({
-        int(x) for x in archive_df["Season"].dropna().tolist()
-        if str(x) != "nan"
-    }) if not archive_df.empty else []
+    season_values = (
+        sorted(
+            {int(x) for x in archive_df["Season"].dropna().tolist() if str(x) != "nan"}
+        )
+        if not archive_df.empty
+        else []
+    )
 
     if DEFAULT_SEASON not in season_values:
         season_values.append(DEFAULT_SEASON)
@@ -303,27 +299,60 @@ def app() -> None:
 
     week_values = list(range(1, 19))
     if not archive_df.empty:
-        week_values = sorted(set(week_values) | {
-            int(x) for x in archive_df["Week"].dropna().tolist()
-            if str(x) != "nan"
-        })
+        week_values = sorted(
+            set(week_values)
+            | {int(x) for x in archive_df["Week"].dropna().tolist() if str(x) != "nan"}
+        )
 
     season = st.sidebar.selectbox(
-    "Season",
-    options=season_values,
-    index=season_values.index(DEFAULT_SEASON) if DEFAULT_SEASON in season_values else 0,
-)
+        "Season",
+        options=season_values,
+        index=(
+            season_values.index(DEFAULT_SEASON)
+            if DEFAULT_SEASON in season_values
+            else 0
+        ),
+    )
 
-week = st.sidebar.selectbox(
-    "Week",
-    options=week_values,
-    index=week_values.index(DEFAULT_WEEK) if DEFAULT_WEEK in week_values else 0,
-)
+    week = st.sidebar.selectbox(
+        "Week",
+        options=week_values,
+        index=week_values.index(DEFAULT_WEEK) if DEFAULT_WEEK in week_values else 0,
+    )
 
-asof_input = st.sidebar.text_input(
-    "As Of (YYYY-MM-DDTHH:MM)",
-    value=datetime.now().isoformat(timespec="minutes"),
-)
+    asof_input = st.sidebar.text_input(
+        "As Of (YYYY-MM-DDTHH:MM)",
+        value=datetime.now().isoformat(timespec="minutes"),
+    )
+
+    archive_season_start = st.sidebar.number_input(
+        "Archive Season Start",
+        min_value=2020,
+        max_value=2100,
+        value=int(season),
+        step=1,
+    )
+    archive_season_end = st.sidebar.number_input(
+        "Archive Season End",
+        min_value=2020,
+        max_value=2100,
+        value=int(season),
+        step=1,
+    )
+    archive_week_start = st.sidebar.number_input(
+        "Archive Week Start",
+        min_value=1,
+        max_value=18,
+        value=1,
+        step=1,
+    )
+    archive_week_end = st.sidebar.number_input(
+        "Archive Week End",
+        min_value=1,
+        max_value=18,
+        value=int(week),
+        step=1,
+    )
 
     now = datetime.now()
     suggested_key = guess_current_edition(now)
@@ -336,7 +365,7 @@ asof_input = st.sidebar.text_input(
 
     st.markdown("### Run report for NOW / special edition")
 
-    col_auto, col_picker = st.columns([2, 2])
+    _, col_picker = st.columns([2, 2])
 
     with col_picker:
         edition_for_now = st.selectbox(
@@ -346,9 +375,9 @@ asof_input = st.sidebar.text_input(
             index=EDITION_ORDER.index(suggested_key),
         )
 
-    if st.button("Generate selected edition"):
+    if st.button("Generate selected edition", key="generate_selected_edition_btn"):
         script = TOOLS_DIR / "generate_report.py"
-        asof_now = datetime.now().isoformat(timespec="minutes")
+        asof_now = asof_input
 
         run_tool_command(
             [
@@ -370,7 +399,7 @@ asof_input = st.sidebar.text_input(
     st.markdown("### Season/Week 3v1 Edition Schedule & File Status")
 
     df_status = build_status_table(int(season), int(week))
-    st.dataframe(df_status, hide_index=True, use_container_width=stretch)
+    st.dataframe(df_status, hide_index=True, width="stretch")
 
     st.markdown("### Existing generated reports for selected season/week")
 
@@ -403,7 +432,59 @@ asof_input = st.sidebar.text_input(
                 )
 
     st.markdown("---")
-    st.markdown("### Historical Reports Archive (2020 onward if available)")
+    run_all_editions_btn = st.button(
+        "Generate ALL 3v1 Editions",
+        key="run_all_editions_btn",
+    )
+
+    if run_all_editions_btn:
+        script = TOOLS_DIR / "generate_all_editions.py"
+        asof_now = asof_input
+
+        run_tool_command(
+            [
+                sys.executable,
+                str(script),
+                "--season",
+                str(season),
+                "--week",
+                str(week),
+                "--asof",
+                asof_now,
+            ],
+            description="Generate ALL 3v1 editions",
+        )
+
+    st.markdown("---")
+    run_archive_btn = st.button(
+        "Generate Archive Range",
+        key="run_archive_btn",
+    )
+
+    if run_archive_btn:
+        script = TOOLS_DIR / "generate_all_reports.py"
+        asof_now = asof_input
+
+        run_tool_command(
+            [
+                sys.executable,
+                str(script),
+                "--season-start",
+                str(int(archive_season_start)),
+                "--season-end",
+                str(int(archive_season_end)),
+                "--week-start",
+                str(int(archive_week_start)),
+                "--week-end",
+                str(int(archive_week_end)),
+                "--asof",
+                asof_now,
+            ],
+            description="Generate archive report range",
+        )
+
+    st.markdown("---")
+    st.markdown("### Historical Reports Archive")
 
     archive_df = build_archive_table()
 
@@ -421,7 +502,7 @@ asof_input = st.sidebar.text_input(
             archive_season = st.selectbox(
                 "Archive Season",
                 options=archive_season_options,
-                index=0 if len(archive_season_options) > 1 else 0,
+                index=0,
             )
 
         if archive_season == "All":
@@ -431,9 +512,13 @@ asof_input = st.sidebar.text_input(
         else:
             week_options = ["All"] + sorted(
                 [
-                    int(x) for x in archive_df.loc[
+                    int(x)
+                    for x in archive_df.loc[
                         archive_df["Season"] == archive_season, "Week"
-                    ].dropna().unique().tolist()
+                    ]
+                    .dropna()
+                    .unique()
+                    .tolist()
                 ]
             )
 
@@ -474,7 +559,7 @@ asof_input = st.sidebar.text_input(
         if archive_edition != "All":
             filtered = filtered[filtered["Edition"] == archive_edition]
 
-        st.dataframe(filtered, hide_index=True, use_container_width=True)
+        st.dataframe(filtered, hide_index=True, width="stretch")
 
         st.markdown("#### Download from archive")
 
@@ -507,31 +592,6 @@ asof_input = st.sidebar.text_input(
                         mime="application/pdf",
                         key=f"archive_dl_{pdf.name}",
                     )
-
-    st.markdown("---")
-
-run_all_editions_btn = st.button(
-    "Generate ALL 3v1 Editions",
-    key="run_all_editions_btn",
-)
-
-if run_all_editions_btn:
-    script = TOOLS_DIR / "generate_all_editions.py"
-    asof_now = asof_input
-
-    run_tool_command(
-        [
-            sys.executable,
-            str(script),
-            "--season",
-            str(season),
-            "--week",
-            str(week),
-            "--asof",
-            asof_now,
-        ],
-        description="Generate ALL 3v1 editions",
-    )
 
 
 app()

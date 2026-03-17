@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+exports/*.csv
+exports/**/*.csv
+exports/*.parquet
+exports/**/*.parquet
+exports/reports/*.pdf
+exports/reports/*.json
