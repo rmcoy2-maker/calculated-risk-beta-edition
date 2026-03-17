@@ -62,6 +62,14 @@ def resolve_paths(
     root = _find_root()
     exports = root / "exports"
 
+    if reports_dir_arg:
+        reports = Path(reports_dir_arg)
+        if not reports.is_absolute():
+            reports = root / reports
+    else:
+        reports = exports / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+
     historical_odds = _existing_first(
         [
             exports / "historical_odds" / "nfl_historical_odds_2020_2025_master.parquet",
