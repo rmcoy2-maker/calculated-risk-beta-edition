@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 import sys
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
@@ -15,8 +16,15 @@ THIS = Path(__file__).resolve()
 
 
 def find_repo_root() -> Path:
-    for p in [THIS.parent] + list(THIS.parents):
-        if (p / "streamlit_app.py").exists():
+    candidates = [THIS.parent] + list(THIS.parents)
+    markers = [
+        "streamlit_app.py",
+        "00_Home.py",
+        "00_Home_download.py",
+        ".git",
+    ]
+    for p in candidates:
+        if any((p / marker).exists() for marker in markers):
             return p
     return Path.cwd()
 
@@ -25,19 +33,21 @@ ROOT = find_repo_root()
 TOOLS_DIR = ROOT / "tools"
 EXPORTS_DIR = ROOT / "exports"
 REPORTS_DIR = EXPORTS_DIR / "reports"
+PRIMARY_CANONICAL_DIR = ROOT / "tools" / "exports" / "canonical"
+FALLBACK_CANONICAL_DIR = ROOT / "exports" / "canonical"
+GENERATOR = TOOLS_DIR / "generate_report.py"
+
+EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
 if TOOLS_DIR.exists() and str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-for p in (EXPORTS_DIR, REPORTS_DIR):
-    p.mkdir(parents=True, exist_ok=True)
-
 
 st.set_page_config(
-    page_title="Doc Odds Reports Hub (3v1 Schedule)",
+    page_title="Calculated Risk Reports Hub",
     page_icon="📑",
     layout="wide",
 )
@@ -57,44 +67,75 @@ EDITION_ORDER = [
 EDITION_META: Dict[str, Dict[str, str]] = {
     "tnf": {
         "name": "TNF – Thursday Night Edition",
-        "timing": "Thu (day-of) – afternoon + kickoff",
+        "timing": "Thu afternoon / kickoff",
     },
     "sunday_morning": {
         "name": "Sunday Morning – full slate preview",
-        "timing": "Sun – early morning > before 1pm window",
+        "timing": "Sun early morning",
     },
     "sunday_afternoon": {
-        "name": "Sunday Afternoon – grades + late slate preview",
-        "timing": "Sun – 1pm–4:25pm windows rolling",
+        "name": "Sunday Afternoon – late slate preview",
+        "timing": "Sun afternoon",
     },
     "snf": {
-        "name": "Sunday Night Football – with Thur–Sun grades",
-        "timing": "Sun – after 4pm window > SNF",
+        "name": "Sunday Night Football",
+        "timing": "Sun evening",
     },
     "monday": {
-        "name": "Monday Morning Edition – with Thur–Sun grades",
-        "timing": "Mon – morning / afternoon before MNF",
+        "name": "Monday Edition",
+        "timing": "Mon morning / pre-MNF wrap",
     },
     "tuesday": {
-        "name": "Tuesday Wrap – full Thur–Mon grades & look-ahead",
-        "timing": "Tue – day after MNF – week wrap + early lookahead",
+        "name": "Tuesday Wrap",
+        "timing": "Tue wrap / look-ahead",
     },
 }
 
 
-@dataclass
-class EditionRow:
-    key: str
-    name: str
-    timing: str
-    pdf_file: str
-    exists: bool
+def sha256_of_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
-def guess_current_edition(now: datetime | None = None) -> str:
-    if now is None:
-        now = datetime.now()
+def expected_json_path(season: int, week: int, edition: str) -> Path:
+    return REPORTS_DIR / f"{season}_week{week}_{edition}_3v1.json"
 
+
+def expected_pdf_path(season: int, week: int, edition: str) -> Path:
+    return REPORTS_DIR / f"{season}_week{week}_{edition}_3v1.pdf"
+
+
+def canonical_file_status(season: int, week: int) -> pd.DataFrame:
+    names = [
+        "cr_games",
+        "cr_edges",
+        "cr_markets",
+        "cr_scores",
+        "cr_parlay_scores",
+    ]
+    rows = []
+    for name in names:
+        primary = PRIMARY_CANONICAL_DIR / f"{name}_{season}_w{week}.csv"
+        fallback = FALLBACK_CANONICAL_DIR / f"{name}_{season}_w{week}.csv"
+        chosen = primary if primary.exists() else fallback
+        rows.append(
+            {
+                "Input": name,
+                "Primary Path": str(primary),
+                "Primary Exists": primary.exists(),
+                "Fallback Path": str(fallback),
+                "Fallback Exists": fallback.exists(),
+                "Chosen Path": str(chosen) if chosen.exists() else "",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def guess_current_edition(now: Optional[datetime] = None) -> str:
+    now = now or datetime.now()
     dow = now.weekday()
     hour = now.hour
 
@@ -114,484 +155,207 @@ def guess_current_edition(now: datetime | None = None) -> str:
         return "monday"
     if dow == 1:
         return "tuesday"
-
     return "sunday_morning"
 
 
-def run_tool_command(args: List[str], description: str, cwd: Path | None = None) -> int:
-    if cwd is None:
-        cwd = TOOLS_DIR
+def run_generator(
+    season: int,
+    week: int,
+    edition: str,
+    asof: str,
+) -> int:
+    args = [
+        sys.executable,
+        str(GENERATOR),
+        "--season",
+        str(season),
+        "--week",
+        str(week),
+        "--edition",
+        edition,
+        "--asof",
+        asof,
+    ]
 
     st.info(
-        f"Python: `{sys.executable}`  \n"
-        f"Running: `{' '.join(args)}`  \n"
-        f"(cwd={cwd})"
+        f"Python: {sys.executable}\n\n"
+        f"Repo root: {ROOT}\n\n"
+        f"Running: {' '.join(args)}\n\n"
+        f"cwd={ROOT}"
     )
 
     try:
         completed = subprocess.run(
             args,
-            cwd=str(cwd),
+            cwd=str(ROOT),
             capture_output=True,
             text=True,
         )
     except Exception as e:
-        st.error(f"{description} failed to start: {e}")
+        st.error(f"Failed to start generator: {e}")
         return 1
 
     if completed.stdout:
-        st.code(completed.stdout)
-
+        st.code(completed.stdout, language="text")
     if completed.stderr:
         st.error(completed.stderr)
 
     if completed.returncode == 0:
-        st.success(f"{description} completed successfully.")
+        st.success("Report generation completed successfully.")
     else:
-        st.error(f"{description} exited with code {completed.returncode}.")
+        st.error(f"Report generation exited with code {completed.returncode}.")
 
     return completed.returncode
 
 
-def build_status_table(season: int, week: int) -> pd.DataFrame:
-    rows: List[EditionRow] = []
-
-    for key in EDITION_ORDER:
-        pattern = f"{season}_week{week}_{key}_3v1"
-
-        exists = any(
-            p.name.startswith(pattern) and p.suffix.lower() == ".pdf"
-            for p in REPORTS_DIR.glob("*.pdf")
-        )
-
-        rows.append(
-            EditionRow(
-                key=key,
-                name=EDITION_META[key]["name"],
-                timing=EDITION_META[key]["timing"],
-                pdf_file=f"{pattern}.pdf",
-                exists=exists,
-            )
-        )
-
-    return pd.DataFrame(
-        [
-            {
-                "Edition Key": r.key,
-                "Edition Name": r.name,
-                "Timing Window": r.timing,
-                "Expected File Pattern": r.pdf_file,
-                "Status": "✅ Generated" if r.exists else "❌ Missing",
-            }
-            for r in rows
-        ]
-    )
+def artifact_row(path: Path) -> dict:
+    stat = path.stat()
+    return {
+        "File": path.name,
+        "Path": str(path),
+        "Modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+        "Bytes": stat.st_size,
+        "SHA256": sha256_of_file(path),
+    }
 
 
-def list_report_files(season: int, week: int) -> list[Path]:
-    prefixes = [
-        f"{season}_week{week}_",
-        f"week{week}_",
-    ]
+def collect_artifacts(season: int, week: int, edition: str) -> List[Path]:
+    files: List[Path] = []
+    for p in [
+        expected_json_path(season, week, edition),
+        expected_pdf_path(season, week, edition),
+    ]:
+        if p.exists():
+            files.append(p)
+    return files
+
+
+def list_report_pdfs_for_week(season: int, week: int) -> List[Path]:
+    exact_prefix = f"{season}_week{week}_"
+    legacy_prefix = f"week{week}_"
 
     files = [
-        p
-        for p in REPORTS_DIR.glob("*.pdf")
-        if any(p.name.startswith(prefix) for prefix in prefixes)
+        p for p in REPORTS_DIR.glob("*.pdf")
+        if p.name.startswith(exact_prefix) or p.name.startswith(legacy_prefix)
     ]
-
     return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
 
 
-def list_all_report_files() -> list[Path]:
-    return sorted(
-        REPORTS_DIR.glob("*.pdf"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-
-
-def parse_report_filename(path: Path) -> dict:
-    stem = path.stem
-
-    parsed = {
-        "file": path.name,
-        "season": None,
-        "week": None,
-        "edition": "",
-        "edition_name": "",
-        "modified": datetime.fromtimestamp(path.stat().st_mtime),
-        "path": path,
-    }
-
-    parts = stem.split("_")
-
-    if len(parts) >= 4 and parts[0].isdigit() and parts[1].startswith("week"):
-        try:
-            parsed["season"] = int(parts[0])
-            parsed["week"] = int(parts[1].replace("week", ""))
-            parsed["edition"] = "_".join(parts[2:-1])
-        except Exception:
-            pass
-    elif len(parts) >= 3 and parts[0].startswith("week"):
-        try:
-            parsed["week"] = int(parts[0].replace("week", ""))
-            parsed["edition"] = "_".join(parts[1:-1])
-        except Exception:
-            pass
-
-    edition_key = parsed["edition"]
-    if edition_key in EDITION_META:
-        parsed["edition_name"] = EDITION_META[edition_key]["name"]
-    else:
-        parsed["edition_name"] = edition_key or "Unknown"
-
-    return parsed
-
-
-def build_archive_table() -> pd.DataFrame:
+def build_status_table(season: int, week: int) -> pd.DataFrame:
     rows = []
-    for pdf in list_all_report_files():
-        info = parse_report_filename(pdf)
+    for edition in EDITION_ORDER:
+        pdf_path = expected_pdf_path(season, week, edition)
+        json_path = expected_json_path(season, week, edition)
         rows.append(
             {
-                "Season": info["season"],
-                "Week": info["week"],
-                "Edition": info["edition"],
-                "Edition Name": info["edition_name"],
-                "File": info["file"],
-                "Modified": info["modified"].strftime("%Y-%m-%d %H:%M"),
+                "Edition": edition,
+                "Edition Name": EDITION_META[edition]["name"],
+                "Timing": EDITION_META[edition]["timing"],
+                "JSON": "✅" if json_path.exists() else "❌",
+                "PDF": "✅" if pdf_path.exists() else "❌",
+                "Expected JSON": json_path.name,
+                "Expected PDF": pdf_path.name,
             }
         )
-
-    if not rows:
-        return pd.DataFrame(
-            columns=["Season", "Week", "Edition", "Edition Name", "File", "Modified"]
-        )
-
     return pd.DataFrame(rows)
 
 
 def app() -> None:
-    st.title("Doc Odds Reports Hub (3v1 Schedule)")
+    st.title("📑 Calculated Risk Reports Hub")
 
     st.caption(f"Repo root: {ROOT}")
+    st.caption(f"Generator: {GENERATOR}")
+    st.caption(f"Primary canonical dir: {PRIMARY_CANONICAL_DIR}")
+    st.caption(f"Fallback canonical dir: {FALLBACK_CANONICAL_DIR}")
     st.caption(f"Reports dir: {REPORTS_DIR}")
-    st.caption(f"App Python: {sys.executable}")
+    st.caption(f"Python: {sys.executable}")
 
-    archive_df = build_archive_table()
+    season = st.sidebar.number_input("Season", min_value=2020, max_value=2100, value=DEFAULT_SEASON, step=1)
+    week = st.sidebar.number_input("Week", min_value=1, max_value=22, value=DEFAULT_WEEK, step=1)
 
-    season_values = (
-        sorted(
-            {int(x) for x in archive_df["Season"].dropna().tolist() if str(x) != "nan"}
-        )
-        if not archive_df.empty
-        else []
+    suggested = guess_current_edition()
+    edition = st.sidebar.selectbox(
+        "Edition",
+        options=EDITION_ORDER,
+        index=EDITION_ORDER.index(suggested),
+        format_func=lambda k: f"{k} — {EDITION_META[k]['name']}",
     )
 
-    if DEFAULT_SEASON not in season_values:
-        season_values.append(DEFAULT_SEASON)
+    asof_default = datetime.now().isoformat(timespec="minutes")
+    asof_input = st.sidebar.text_input("As Of (YYYY-MM-DDTHH:MM)", value=asof_default)
 
-    season_values = sorted(set(season_values))
+    st.markdown("### Canonical input status")
+    st.dataframe(canonical_file_status(int(season), int(week)), hide_index=True, use_container_width=True)
 
-    if not season_values:
-        season_values = [DEFAULT_SEASON]
+    st.markdown("### Expected output status")
+    st.dataframe(build_status_table(int(season), int(week)), hide_index=True, use_container_width=True)
 
-    week_values = list(range(1, 19))
-    if not archive_df.empty:
-        week_values = sorted(
-            set(week_values)
-            | {int(x) for x in archive_df["Week"].dropna().tolist() if str(x) != "nan"}
-        )
+    st.markdown("### Generate single report")
+    if st.button("Generate selected edition", type="primary"):
+        if not GENERATOR.exists():
+            st.error(f"Generator not found: {GENERATOR}")
+        else:
+            rc = run_generator(int(season), int(week), edition, asof_input)
+            if rc == 0:
+                st.rerun()
 
-    season = st.sidebar.selectbox(
-        "Season",
-        options=season_values,
-        index=(
-            season_values.index(DEFAULT_SEASON)
-            if DEFAULT_SEASON in season_values
-            else 0
-        ),
-    )
+    st.markdown("### Selected artifact details")
+    artifacts = collect_artifacts(int(season), int(week), edition)
 
-    week = st.sidebar.selectbox(
-        "Week",
-        options=week_values,
-        index=week_values.index(DEFAULT_WEEK) if DEFAULT_WEEK in week_values else 0,
-    )
-
-    asof_input = st.sidebar.text_input(
-        "As Of (YYYY-MM-DDTHH:MM)",
-        value=datetime.now().isoformat(timespec="minutes"),
-    )
-
-    archive_season_start = st.sidebar.number_input(
-        "Archive Season Start",
-        min_value=2020,
-        max_value=2100,
-        value=int(season),
-        step=1,
-    )
-    archive_season_end = st.sidebar.number_input(
-        "Archive Season End",
-        min_value=2020,
-        max_value=2100,
-        value=int(season),
-        step=1,
-    )
-    archive_week_start = st.sidebar.number_input(
-        "Archive Week Start",
-        min_value=1,
-        max_value=18,
-        value=1,
-        step=1,
-    )
-    archive_week_end = st.sidebar.number_input(
-        "Archive Week End",
-        min_value=1,
-        max_value=18,
-        value=int(week),
-        step=1,
-    )
-
-    now = datetime.now()
-    suggested_key = guess_current_edition(now)
-    suggested_meta = EDITION_META[suggested_key]
-
-    st.caption(
-        f"Current slot: **{now:%A %Y-%m-%d %H:%M}** — suggested edition: "
-        f"**{suggested_key}** ({suggested_meta['name']})."
-    )
-
-    st.markdown("### Run report for NOW / special edition")
-
-    _, col_picker = st.columns([2, 2])
-
-    with col_picker:
-        edition_for_now = st.selectbox(
-            "Edition to run",
-            options=EDITION_ORDER,
-            format_func=lambda k: f"{k} — {EDITION_META[k]['name']}",
-            index=EDITION_ORDER.index(suggested_key),
-        )
-
-    if st.button("Generate selected edition", key="generate_selected_edition_btn"):
-        script = TOOLS_DIR / "generate_report.py"
-        asof_now = asof_input
-
-        run_tool_command(
-            [
-                sys.executable,
-                str(script),
-                "--season",
-                str(season),
-                "--week",
-                str(week),
-                "--edition",
-                edition_for_now,
-                "--asof",
-                asof_now,
-            ],
-            description=f"Generate selected 3v1 edition ({edition_for_now})",
-        )
-
-    st.markdown("---")
-    st.markdown("### Season/Week 3v1 Edition Schedule & File Status")
-
-    df_status = build_status_table(int(season), int(week))
-    st.dataframe(df_status, hide_index=True, width="stretch")
-
-    st.markdown("### Existing generated reports for selected season/week")
-
-    files = list_report_files(int(season), int(week))
-
-    if not files:
-        st.caption("No generated reports found yet for this season/week.")
+    if not artifacts:
+        st.info("No JSON/PDF found yet for the selected season/week/edition.")
     else:
-        for pdf in files:
-            info = parse_report_filename(pdf)
+        rows = [artifact_row(p) for p in artifacts]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
-            col1, col2 = st.columns([4, 1])
+        for p in artifacts:
+            st.markdown(f"**{p.name}**")
+            st.caption(str(p))
+            st.caption(
+                f"Modified: {datetime.fromtimestamp(p.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')} | "
+                f"Bytes: {p.stat().st_size} | "
+                f"SHA256: {sha256_of_file(p)}"
+            )
 
-            with col1:
-                st.write(
-                    f"**{pdf.name}**"
-                    f"  \nSeason: {info['season'] if info['season'] is not None else 'Unknown'}"
-                    f" | Week: {info['week'] if info['week'] is not None else 'Unknown'}"
-                    f" | Edition: {info['edition_name']}"
-                    f" | Modified: {info['modified'].strftime('%Y-%m-%d %H:%M')}"
-                )
+            if p.suffix.lower() == ".json":
+                try:
+                    payload = json.loads(p.read_text(encoding="utf-8"))
+                    with st.expander("Preview JSON"):
+                        st.json(payload)
+                except Exception as e:
+                    st.warning(f"Could not preview JSON: {e}")
 
-            with col2:
-                st.download_button(
-                    label="Download",
-                    data=pdf.read_bytes(),
-                    file_name=pdf.name,
-                    mime="application/pdf",
-                    key=f"dl_{pdf.name}",
-                )
-
-    st.markdown("---")
-    run_all_editions_btn = st.button(
-        "Generate ALL 3v1 Editions",
-        key="run_all_editions_btn",
-    )
-
-    if run_all_editions_btn:
-        script = TOOLS_DIR / "generate_all_editions.py"
-        asof_now = asof_input
-
-        run_tool_command(
-            [
-                sys.executable,
-                str(script),
-                "--season",
-                str(season),
-                "--week",
-                str(week),
-                "--asof",
-                asof_now,
-            ],
-            description="Generate ALL 3v1 editions",
-        )
+            mime = "application/pdf" if p.suffix.lower() == ".pdf" else "application/json"
+            st.download_button(
+                label=f"Download {p.suffix.upper().replace('.', '')}",
+                data=p.read_bytes(),
+                file_name=p.name,
+                mime=mime,
+                key=f"download_{p.name}",
+            )
 
     st.markdown("---")
-    run_archive_btn = st.button(
-        "Generate Archive Range",
-        key="run_archive_btn",
-    )
+    st.markdown("### Existing PDFs for selected season/week")
 
-    if run_archive_btn:
-        script = TOOLS_DIR / "generate_all_reports.py"
-        asof_now = asof_input
-
-        run_tool_command(
-            [
-                sys.executable,
-                str(script),
-                "--season-start",
-                str(int(archive_season_start)),
-                "--season-end",
-                str(int(archive_season_end)),
-                "--week-start",
-                str(int(archive_week_start)),
-                "--week-end",
-                str(int(archive_week_end)),
-                "--asof",
-                asof_now,
-            ],
-            description="Generate archive report range",
-        )
-
-    st.markdown("---")
-    st.markdown("### Historical Reports Archive")
-
-    archive_df = build_archive_table()
-
-    if archive_df.empty:
-        st.caption("No report PDFs found in the archive yet.")
+    pdfs = list_report_pdfs_for_week(int(season), int(week))
+    if not pdfs:
+        st.caption("No PDF reports found for this season/week.")
     else:
-        valid_seasons = sorted(
-            [int(x) for x in archive_df["Season"].dropna().unique().tolist()]
-        )
-        archive_season_options = ["All"] + valid_seasons
-
-        archive_col1, archive_col2, archive_col3 = st.columns(3)
-
-        with archive_col1:
-            archive_season = st.selectbox(
-                "Archive Season",
-                options=archive_season_options,
-                index=0,
+        for pdf in pdfs:
+            st.markdown(f"**{pdf.name}**")
+            st.caption(str(pdf))
+            st.caption(
+                f"Modified: {datetime.fromtimestamp(pdf.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')} | "
+                f"Bytes: {pdf.stat().st_size} | "
+                f"SHA256: {sha256_of_file(pdf)}"
             )
-
-        if archive_season == "All":
-            week_options = ["All"] + sorted(
-                [int(x) for x in archive_df["Week"].dropna().unique().tolist()]
+            st.download_button(
+                label="Download PDF",
+                data=pdf.read_bytes(),
+                file_name=pdf.name,
+                mime="application/pdf",
+                key=f"pdf_{pdf.name}",
             )
-        else:
-            week_options = ["All"] + sorted(
-                [
-                    int(x)
-                    for x in archive_df.loc[
-                        archive_df["Season"] == archive_season, "Week"
-                    ]
-                    .dropna()
-                    .unique()
-                    .tolist()
-                ]
-            )
-
-        with archive_col2:
-            archive_week = st.selectbox(
-                "Archive Week",
-                options=week_options,
-                index=0,
-            )
-
-        if archive_season == "All":
-            edition_options = ["All"] + sorted(
-                archive_df["Edition"].dropna().astype(str).unique().tolist()
-            )
-        else:
-            filt = archive_df["Season"] == archive_season
-            if archive_week != "All":
-                filt = filt & (archive_df["Week"] == archive_week)
-            edition_options = ["All"] + sorted(
-                archive_df.loc[filt, "Edition"].dropna().astype(str).unique().tolist()
-            )
-
-        with archive_col3:
-            archive_edition = st.selectbox(
-                "Archive Edition",
-                options=edition_options,
-                index=0,
-            )
-
-        filtered = archive_df.copy()
-
-        if archive_season != "All":
-            filtered = filtered[filtered["Season"] == archive_season]
-
-        if archive_week != "All":
-            filtered = filtered[filtered["Week"] == archive_week]
-
-        if archive_edition != "All":
-            filtered = filtered[filtered["Edition"] == archive_edition]
-
-        st.dataframe(filtered, hide_index=True, width="stretch")
-
-        st.markdown("#### Download from archive")
-
-        archive_files = []
-        for _, row in filtered.iterrows():
-            path = REPORTS_DIR / row["File"]
-            if path.exists():
-                archive_files.append(path)
-
-        if not archive_files:
-            st.caption("No matching archive PDFs available to download.")
-        else:
-            for pdf in archive_files[:50]:
-                info = parse_report_filename(pdf)
-                col1, col2 = st.columns([4, 1])
-
-                with col1:
-                    st.write(
-                        f"**{pdf.name}**"
-                        f"  \nSeason: {info['season'] if info['season'] is not None else 'Unknown'}"
-                        f" | Week: {info['week'] if info['week'] is not None else 'Unknown'}"
-                        f" | Edition: {info['edition_name']}"
-                    )
-
-                with col2:
-                    st.download_button(
-                        label="Download",
-                        data=pdf.read_bytes(),
-                        file_name=pdf.name,
-                        mime="application/pdf",
-                        key=f"archive_dl_{pdf.name}",
-                    )
 
 
 app()
