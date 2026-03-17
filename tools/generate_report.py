@@ -470,13 +470,51 @@ def section_parlays(parlays: pd.DataFrame, limit: int = 3, edges: pd.DataFrame |
     return []
 
 
-def build_report_payload(season: int, week: int, edition: str, as_of: Optional[str], edges: pd.DataFrame, games: pd.DataFrame, parlays: pd.DataFrame, proj_master: pd.DataFrame | None = None) -> dict[str, Any]:
+def build_report_payload(
+    season: int,
+    week: int,
+    edition: str,
+    as_of: Optional[str],
+    edges: pd.DataFrame,
+    games: pd.DataFrame,
+    parlays: pd.DataFrame,
+    proj_master: pd.DataFrame | None = None,
+) -> dict[str, Any]:
     return {
-        "title": f"CALCULATED RISK™ · EDGE FACTOR™ · 3v1™
-FORT KNOX — WEEK {week} {EDITION_TITLES.get(edition, edition.upper())}",
-        "meta": {"week": week, "season": season, "edition": edition, "as_of": as_of, "prepared_by": "Doc Odds — Educational & Entertainment Use Only", "confidence_bands": ["Gold (90-95): highest-confidence board only", "Dark Green (75-89): strong edge with solid support", "Green (60-74): playable edge", "Yellow (45-59): lean / context play", "Amber (25-44): weak support", "Red (<25): avoid / informational only"], "simulation_basis": DEFAULT_SIM_BASIS},
-        "sections": {"top_edges": section_top_edges(edges), "heatmap": section_heatmap(edges), "game_scripts": section_scripts(games, edges, proj_master=proj_master), "parlays": section_parlays(parlays, edges=edges)},
-        "appendix": {"edge_count": int(len(edges)), "game_count": int(len(games)), "parlay_count": int(len(parlays)), "notes": ["This report is for educational and entertainment purposes only."]},
+        "title": (
+            f"CALCULATED RISK™ · EDGE FACTOR™ · 3v1™\n"
+            f"FORT KNOX — WEEK {week} {EDITION_TITLES.get(edition, edition.upper())}"
+        ),
+        "meta": {
+            "week": week,
+            "season": season,
+            "edition": edition,
+            "as_of": as_of,
+            "prepared_by": "Doc Odds — Educational & Entertainment Use Only",
+            "confidence_bands": [
+                "Gold (90-95): highest-confidence board only",
+                "Dark Green (75-89): strong edge with solid support",
+                "Green (60-74): playable edge",
+                "Yellow (45-59): lean / context play",
+                "Amber (25-44): weak support",
+                "Red (<25): avoid / informational only.",
+            ],
+            "simulation_basis": DEFAULT_SIM_BASIS,
+        },
+        "sections": {
+            "top_edges": section_top_edges(edges),
+            "heatmap": section_heatmap(edges),
+            "game_scripts": section_scripts(games, edges, proj_master=proj_master),
+            "parlays": section_parlays(parlays, edges=edges),
+        },
+        "appendix": {
+            "edge_count": int(len(edges)),
+            "game_count": int(len(games)),
+            "parlay_count": int(len(parlays)),
+            "notes": [
+                "This report is for educational and entertainment purposes only."
+            ],
+        },
     }
 
 
